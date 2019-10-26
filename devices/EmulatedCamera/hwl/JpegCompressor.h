@@ -17,6 +17,8 @@
 #ifndef HW_EMULATOR_CAMERA_JPEG_H
 #define HW_EMULATOR_CAMERA_JPEG_H
 
+#include <hwl_types.h>
+
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -24,8 +26,6 @@
 
 #include "Base.h"
 #include "HandleImporter.h"
-
-#include <hwl_types.h>
 
 extern "C" {
 #include <jpeglib.h>
@@ -40,75 +40,75 @@ using google_camera_hal::BufferStatus;
 using google_camera_hal::HwlPipelineCallback;
 using google_camera_hal::HwlPipelineResult;
 
-struct JpegARGBInput {
-    uint32_t width, height;
-    uint32_t stride;
-    uint8_t *img;
+struct JpegYUV420Input {
+  uint32_t width, height;
+  bool buffer_owner;
+  YCbCrPlanes yuv_planes;
 
-    JpegARGBInput() : width(0), height(0), stride(0), img(nullptr) {}
-    ~JpegARGBInput() {
-        if (img != nullptr) {
-            delete [] img;
-            img = nullptr;
-        }
+  JpegYUV420Input() : width(0), height(0), buffer_owner(false) {
+  }
+  ~JpegYUV420Input() {
+    if ((yuv_planes.img_y != nullptr) && buffer_owner) {
+      delete[] yuv_planes.img_y;
+      yuv_planes = {};
     }
+  }
 
-    JpegARGBInput(const JpegARGBInput&) = delete;
-    JpegARGBInput& operator = (const JpegARGBInput&) = delete;
+  JpegYUV420Input(const JpegYUV420Input&) = delete;
+  JpegYUV420Input& operator=(const JpegYUV420Input&) = delete;
 };
 
-struct JpegJob {
-    std::unique_ptr<JpegARGBInput> input;
-    std::unique_ptr<SensorBuffer> output;
-    std::unique_ptr<HalCameraMetadata> resultMetadata;
+struct JpegYUV420Job {
+  std::unique_ptr<JpegYUV420Input> input;
+  std::unique_ptr<SensorBuffer> output;
+  std::unique_ptr<HalCameraMetadata> result_metadata;
 };
 
 class JpegCompressor {
-public:
-    JpegCompressor(std::unique_ptr<ExifUtils> exifUtils);
-    virtual ~JpegCompressor();
+ public:
+  JpegCompressor(std::unique_ptr<ExifUtils> exif_utils);
+  virtual ~JpegCompressor();
 
-    status_t queue(std::unique_ptr<JpegJob> job);
+  status_t QueueYUV420(std::unique_ptr<JpegYUV420Job> job);
 
-private:
-    std::mutex mMutex;
-    std::condition_variable mCondition;
-    bool mJpegDone = false;
-    std::thread mJpegProcessingThread;
-    HandleImporter mImporter;
-    std::queue<std::unique_ptr<JpegJob>> mPendingJobs;
-    std::unique_ptr<ExifUtils> mExifUtils;
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::atomic_bool jpeg_done_ = false;
+  std::thread jpeg_processing_thread_;
+  std::queue<std::unique_ptr<JpegYUV420Job>> pending_yuv_jobs_;
+  std::unique_ptr<ExifUtils> exif_utils_;
+  std::string exif_make_, exif_model_;
 
-    j_common_ptr mJpegErrorInfo;
-    bool checkError(const char *msg);
-    void compress(std::unique_ptr<JpegJob> job);
-    struct ARGBFrame {
-        uint8_t *outputBuffer;
-        size_t outputBufferSize;
-        uint8_t *inputBuffer;
-        size_t inputBufferStride;
-        size_t width;
-        size_t height;
-        const uint8_t *app1Buffer;
-        size_t app1BufferSize;
-    };
-    size_t compressARGBFrame(ARGBFrame frame);
-    void threadLoop();
+  j_common_ptr jpeg_error_info_;
+  bool CheckError(const char* msg);
+  void CompressYUV420(std::unique_ptr<JpegYUV420Job> job);
+  struct YUV420Frame {
+    uint8_t* output_buffer;
+    size_t output_buffer_size;
+    YCbCrPlanes yuv_planes;
+    size_t width;
+    size_t height;
+    const uint8_t* app1_buffer;
+    size_t app1_buffer_size;
+  };
+  size_t CompressYUV420Frame(YUV420Frame frame);
+  void ThreadLoop();
 
-    JpegCompressor(const JpegCompressor&) = delete;
-    JpegCompressor& operator = (const JpegCompressor&) = delete;
+  JpegCompressor(const JpegCompressor&) = delete;
+  JpegCompressor& operator=(const JpegCompressor&) = delete;
 };
 
 }  // namespace android
 
-template<>
+template <>
 struct std::default_delete<jpeg_compress_struct> {
-    inline void operator() (jpeg_compress_struct *cinfo) const {
-        if (cinfo != nullptr) {
-            jpeg_destroy_compress(cinfo);
-            delete cinfo;
-        }
+  inline void operator()(jpeg_compress_struct* cinfo) const {
+    if (cinfo != nullptr) {
+      jpeg_destroy_compress(cinfo);
+      delete cinfo;
     }
+  }
 };
 
 #endif

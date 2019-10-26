@@ -17,12 +17,16 @@
 #ifndef EMULATOR_CAMERA_HAL_HWL_HWL_UTILS_H_
 #define EMULATOR_CAMERA_HAL_HWL_HWL_UTILS_H_
 
-#include "hwl_types.h"
 #include "EmulatedSensor.h"
+#include "hwl_types.h"
 #include "system/camera_metadata.h"
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
+#endif
+
+#ifndef RAT_TO_FLOAT
+#define RAT_TO_FLOAT(a) (static_cast<float>(a.numerator) / a.denominator)
 #endif
 
 namespace android {
@@ -30,11 +34,11 @@ namespace android {
 using google_camera_hal::HalCameraMetadata;
 
 // Metadata utility functions start
-bool hasCapability(const HalCameraMetadata* metadata, uint8_t capability);
-status_t getSensorCharacteristics(const HalCameraMetadata* metadata,
-        SensorCharacteristics* sensorChars /*out*/);
+bool HasCapability(const HalCameraMetadata* metadata, uint8_t capability);
+status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
+                                  SensorCharacteristics* sensor_chars /*out*/);
 // Metadata utility functions end
 
-} // namespace android ends here
+}  // namespace android
 
 #endif  // EMULATOR_CAMERA_HAL_HWL_HWL_UTILS_H_
