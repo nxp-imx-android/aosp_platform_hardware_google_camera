@@ -60,6 +60,16 @@ bool IsJPEGSnapshotStream(const Stream& stream) {
   return false;
 }
 
+bool IsOutputZslStream(const Stream& stream) {
+  if (stream.stream_type == StreamType::kOutput &&
+      (stream.usage & GRALLOC_USAGE_HW_CAMERA_ZSL) ==
+          GRALLOC_USAGE_HW_CAMERA_ZSL) {
+    return true;
+  }
+
+  return false;
+}
+
 bool IsVideoStream(const Stream& stream) {
   if (stream.stream_type == StreamType::kOutput &&
       (stream.usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) != 0) {
@@ -249,7 +259,18 @@ bool IsSessionParameterCompatible(const HalCameraMetadata* old_session,
   auto old_session_count = old_session->GetEntryCount();
   auto new_session_count = new_session->GetEntryCount();
   if (old_session_count == 0 || new_session_count == 0) {
-    ALOGI("No session paramerter");
+    ALOGI("No session paramerter, old:%zu, new:%zu", old_session_count,
+          new_session_count);
+    if (new_session_count != 0) {
+      camera_metadata_ro_entry_t entry;
+      if (new_session->Get(ANDROID_CONTROL_AE_TARGET_FPS_RANGE, &entry) == OK) {
+        int32_t max_fps = entry.data.i32[1];
+        if (max_fps > 30) {
+          ALOGI("new session paramerter max fps:%d", max_fps);
+          return false;
+        }
+      }
+    }
     return true;
   }
 
