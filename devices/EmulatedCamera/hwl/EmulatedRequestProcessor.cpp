@@ -198,9 +198,7 @@ status_t EmulatedRequestProcessor::LockSensorBuffer(
 
   auto width = static_cast<int32_t>(stream.width);
   auto height = static_cast<int32_t>(stream.height);
-  auto usage = stream.is_input
-                   ? GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN
-                   : stream.producer_usage;
+  auto usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
   if (stream.override_format == HAL_PIXEL_FORMAT_YCBCR_420_888) {
     IMapper::Rect map_rect = {0, 0, width, height};
     auto yuv_layout = importer.lockYCbCr(buffer, usage, map_rect);
@@ -232,21 +230,25 @@ status_t EmulatedRequestProcessor::LockSensorBuffer(
   } else {
     uint32_t buffer_size = 0, stride = 0;
     auto ret = GetBufferSizeAndStride(stream, &buffer_size, &stride);
-    if (ret == OK) {
-      sensor_buffer->plane.img.img =
-          static_cast<uint8_t*>(importer.lock(buffer, usage, buffer_size));
-      if (sensor_buffer->plane.img.img != nullptr) {
-        sensor_buffer->plane.img.stride = stride;
-        sensor_buffer->plane.img.buffer_size = buffer_size;
-      } else {
-        ALOGE("%s: Failed to lock output buffer!", __FUNCTION__);
-        return BAD_VALUE;
-      }
-    } else {
+    if (ret != OK) {
       ALOGE("%s: Unsupported pixel format: 0x%x", __FUNCTION__,
             stream.override_format);
       return BAD_VALUE;
     }
+    if (stream.override_format == HAL_PIXEL_FORMAT_BLOB) {
+      sensor_buffer->plane.img.img =
+          static_cast<uint8_t*>(importer.lock(buffer, usage, buffer_size));
+    } else {
+      IMapper::Rect region{0, 0, width, height};
+      sensor_buffer->plane.img.img =
+          static_cast<uint8_t*>(importer.lock(buffer, usage, region));
+    }
+    if (sensor_buffer->plane.img.img == nullptr) {
+      ALOGE("%s: Failed to lock output buffer!", __FUNCTION__);
+      return BAD_VALUE;
+    }
+    sensor_buffer->plane.img.stride = stride;
+    sensor_buffer->plane.img.buffer_size = buffer_size;
   }
 
   return OK;
@@ -279,11 +281,19 @@ std::unique_ptr<SensorBuffer> EmulatedRequestProcessor::CreateSensorBuffer(
   // In case buffer processing is successful, flip this flag accordingly
   buffer->stream_buffer.status = BufferStatus::kError;
 
-  auto ret = LockSensorBuffer(stream, buffer->importer, stream_buffer.buffer,
-                              buffer.get());
-  if (ret != OK) {
+  if (!buffer->importer.importBuffer(buffer->stream_buffer.buffer)) {
+    ALOGE("%s: Failed importing stream buffer!", __FUNCTION__);
     buffer.release();
     buffer = nullptr;
+  }
+
+  if (buffer.get() != nullptr) {
+    auto ret = LockSensorBuffer(stream, buffer->importer,
+                                buffer->stream_buffer.buffer, buffer.get());
+    if (ret != OK) {
+      buffer.release();
+      buffer = nullptr;
+    }
   }
 
   if ((buffer.get() != nullptr) && (stream_buffer.acquire_fence != nullptr)) {

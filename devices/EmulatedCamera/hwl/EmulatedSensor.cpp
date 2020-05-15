@@ -346,15 +346,16 @@ status_t EmulatedSensor::StartUp(
     return BAD_VALUE;
   }
 
-  auto device_chars = logical_chars->find(logical_camera_id);
-  if (device_chars == logical_chars->end()) {
+  chars_ = std::move(logical_chars);
+  auto device_chars = chars_->find(logical_camera_id);
+  if (device_chars == chars_->end()) {
     ALOGE(
         "%s: Logical camera id: %u absent from logical camera characteristics!",
         __FUNCTION__, logical_camera_id);
     return BAD_VALUE;
   }
 
-  for (const auto& it : *logical_chars) {
+  for (const auto& it : *chars_) {
     if (!AreCharacteristicsSupported(it.second)) {
       ALOGE("%s: Sensor characteristics for camera id: %u not supported!",
             __FUNCTION__, it.first);
@@ -363,12 +364,10 @@ status_t EmulatedSensor::StartUp(
   }
 
   logical_camera_id_ = logical_camera_id;
-  chars_ = std::move(logical_chars);
-  scene_ = new EmulatedScene(device_chars->second.width,
-                             device_chars->second.height,
-                             kElectronsPerLuxSecond,
-                             device_chars->second.orientation,
-                             device_chars->second.is_front_facing);
+  scene_ = new EmulatedScene(
+      device_chars->second.width, device_chars->second.height,
+      kElectronsPerLuxSecond, device_chars->second.orientation,
+      device_chars->second.is_front_facing);
   jpeg_compressor_ = std::make_unique<JpegCompressor>();
 
   auto res = run(LOG_TAG, ANDROID_PRIORITY_URGENT_DISPLAY);
@@ -1090,7 +1089,7 @@ void EmulatedSensor::CaptureDepth(uint8_t* img, uint32_t gain, uint32_t width,
 
   for (unsigned int y = 0, out_y = 0; y < chars.height; y += inc_v, out_y++) {
     scene_->SetReadoutPixel(0, y);
-    uint16_t* px = ((uint16_t*)img) + out_y * stride;
+    uint16_t* px = (uint16_t*)(img + (out_y * stride));
     for (unsigned int x = 0; x < chars.width; x += inc_h) {
       uint32_t depth_count;
       // TODO: Make up real depth scene instead of using green channel
