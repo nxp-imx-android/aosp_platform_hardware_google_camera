@@ -90,6 +90,7 @@ cc_library_shared {
         "libcutils",
         "libgooglecamerahalutils",
         "libhidlbase",
+        "libbase",
         "liblog",
         "libmeminfo",
         "libutils",
