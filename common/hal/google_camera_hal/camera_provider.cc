@@ -28,9 +28,9 @@
 
 // HWL layer implementation path
 #if defined(_LP64)
-std::string kCameraHwlLib = "/vendor/lib64/libgooglecamerahwl_impl.so";
+std::string kCameraHwlLib = "/vendor/lib64/libimxcamerahwl_impl.so";
 #else // defined(_LP64)
-std::string kCameraHwlLib = "/vendor/lib/libgooglecamerahwl_impl.so";
+std::string kCameraHwlLib = "/vendor/lib/libimxcamerahwl_impl.so";
 #endif
 
 namespace android {
