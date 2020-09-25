@@ -17,6 +17,7 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "GCH_CameraProvider"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
+#include <android-base/properties.h>
 #include <log/log.h>
 #include <utils/Trace.h>
 
@@ -28,9 +29,11 @@
 
 // HWL layer implementation path
 #if defined(_LP64)
-std::string kCameraHwlLib = "/vendor/lib64/libimxcamerahwl_impl.so";
+std::string kCameraHwlLib = "/vendor/lib64/libgooglecamerahwl_impl.so";
+std::string kImxCameraHwlLib = "/vendor/lib64/libimxcamerahwl_impl.so";
 #else // defined(_LP64)
-std::string kCameraHwlLib = "/vendor/lib/libimxcamerahwl_impl.so";
+std::string kCameraHwlLib = "/vendor/lib/libgooglecamerahwl_impl.so";
+std::string kImxCameraHwlLib = "/vendor/lib/libimxcamerahwl_impl.so";
 #endif
 
 namespace android {
@@ -293,6 +296,9 @@ status_t CameraProvider::CreateCameraProviderHwl(
   ATRACE_CALL();
   CreateCameraProviderHwl_t create_hwl;
 
+  if (base::GetProperty("ro.board.platform", "") == "imx") {
+      kCameraHwlLib = kImxCameraHwlLib;
+  }
   ALOGI("%s:Loading %s library", __FUNCTION__, kCameraHwlLib.c_str());
   hwl_lib_handle_ = dlopen(kCameraHwlLib.c_str(), RTLD_NOW);
 
