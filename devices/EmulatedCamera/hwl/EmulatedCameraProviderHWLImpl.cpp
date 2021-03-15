@@ -668,7 +668,7 @@ status_t EmulatedCameraProviderHwlImpl::Initialize() {
   size_t logical_id = 0;
   std::vector<const char*> configurationFileLocation;
   char prop[PROPERTY_VALUE_MAX];
-  if (!property_get_bool("ro.kernel.qemu", false)) {
+  if (!property_get_bool("ro.boot.qemu", false)) {
     for (const auto& iter : kConfigurationFileLocation) {
       configurationFileLocation.emplace_back(iter);
     }
@@ -699,11 +699,13 @@ status_t EmulatedCameraProviderHwlImpl::Initialize() {
       continue;
     }
 
-    Json::Reader config_reader;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> config_reader(builder.newCharReader());
     Json::Value root;
-    if (!config_reader.parse(config, root)) {
+    std::string errorMessage;
+    if (!config_reader->parse(&*config.begin(), &*config.end(), &root, &errorMessage)) {
       ALOGE("Could not parse configuration file: %s",
-            config_reader.getFormattedErrorMessages().c_str());
+            errorMessage.c_str());
       return BAD_VALUE;
     }
 
