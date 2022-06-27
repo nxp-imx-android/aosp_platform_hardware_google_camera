@@ -70,6 +70,7 @@ cc_library_shared {
         "realtime_process_block.cc",
         "realtime_zsl_request_processor.cc",
         "realtime_zsl_result_processor.cc",
+        "realtime_zsl_result_request_processor.cc",
         "rgbird_capture_session.cc",
         "rgbird_depth_result_processor.cc",
         "rgbird_result_request_processor.cc",
@@ -96,6 +97,7 @@ cc_library_shared {
     ],
     header_libs: [
         "lib_depth_generator_headers",
+        "libgooglecamerahal_headers",
     ],
     // b/129863492, clang-tidy nondeterministic seg fault
     tidy: false,

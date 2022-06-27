@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,55 +14,80 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "GCH_HidlUtils"
+#define LOG_TAG "GCH_AidlUtils"
 //#define LOG_NDEBUG 0
+#include "aidl_utils.h"
+
+#include <aidlcommonsupport/NativeHandle.h>
 #include <log/log.h>
+
 #include <regex>
 
-#include "hidl_camera_device.h"
-#include "hidl_utils.h"
+#include "aidl_camera_device.h"
+#include "aidl_camera_provider.h"
 
 namespace android {
 namespace hardware {
 namespace camera {
 namespace implementation {
-namespace hidl_utils {
+namespace aidl_utils {
 
-using ::android::hardware::camera::device::V3_2::ErrorCode;
-using ::android::hardware::camera::device::V3_2::ErrorMsg;
-using ::android::hardware::camera::device::V3_2::MsgType;
-using ::android::hardware::camera::device::V3_2::ShutterMsg;
-using ::android::hardware::camera::device::V3_7::implementation::HidlCameraDevice;
-using android::hardware::camera::metadata::V3_6::
-    CameraMetadataEnumAndroidSensorPixelMode;
-using ::android::hardware::camera::provider::V2_7::implementation::HidlCameraProvider;
+using AidlCameraProvider = provider::implementation::AidlCameraProvider;
+using AidlCameraDevice = device::implementation::AidlCameraDevice;
+using AidlStatus = aidl::android::hardware::camera::common::Status;
 
-status_t ConvertToHidlVendorTagType(
+ScopedAStatus ConvertToAidlReturn(status_t hal_status) {
+  switch (hal_status) {
+    case OK:
+      return ScopedAStatus::ok();
+    case BAD_VALUE:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
+    case -EBUSY:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::CAMERA_IN_USE));
+    case -EUSERS:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::MAX_CAMERAS_IN_USE));
+    case UNKNOWN_TRANSACTION:
+    case INVALID_OPERATION:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::OPERATION_NOT_SUPPORTED));
+    case DEAD_OBJECT:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::CAMERA_DISCONNECTED));
+    default:
+      return ScopedAStatus::fromServiceSpecificError(
+          static_cast<int32_t>(Status::INTERNAL_ERROR));
+  }
+}
+
+status_t ConvertToAidlVendorTagType(
     google_camera_hal::CameraMetadataType hal_type,
-    CameraMetadataType* hidl_type) {
-  if (hidl_type == nullptr) {
-    ALOGE("%s: hidl_type is nullptr.", __FUNCTION__);
+    CameraMetadataType* aidl_type) {
+  if (aidl_type == nullptr) {
+    ALOGE("%s: aidl_type is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
   switch (hal_type) {
     case google_camera_hal::CameraMetadataType::kByte:
-      *hidl_type = CameraMetadataType::BYTE;
+      *aidl_type = CameraMetadataType::BYTE;
       break;
     case google_camera_hal::CameraMetadataType::kInt32:
-      *hidl_type = CameraMetadataType::INT32;
+      *aidl_type = CameraMetadataType::INT32;
       break;
     case google_camera_hal::CameraMetadataType::kFloat:
-      *hidl_type = CameraMetadataType::FLOAT;
+      *aidl_type = CameraMetadataType::FLOAT;
       break;
     case google_camera_hal::CameraMetadataType::kInt64:
-      *hidl_type = CameraMetadataType::INT64;
+      *aidl_type = CameraMetadataType::INT64;
       break;
     case google_camera_hal::CameraMetadataType::kDouble:
-      *hidl_type = CameraMetadataType::DOUBLE;
+      *aidl_type = CameraMetadataType::DOUBLE;
       break;
     case google_camera_hal::CameraMetadataType::kRational:
-      *hidl_type = CameraMetadataType::RATIONAL;
+      *aidl_type = CameraMetadataType::RATIONAL;
       break;
     default:
       ALOGE("%s: Unknown google_camera_hal::CameraMetadataType: %u",
@@ -73,86 +98,64 @@ status_t ConvertToHidlVendorTagType(
   return OK;
 }
 
-status_t ConvertToHidlResourceCost(
-    const google_camera_hal::CameraResourceCost& hal_cost,
-    CameraResourceCost* hidl_cost) {
-  if (hidl_cost == nullptr) {
-    ALOGE("%s: hidl_cost is nullptr.", __FUNCTION__);
+status_t ConvertToAidlVendorTagSections(
+    const std::vector<google_camera_hal::VendorTagSection>& hal_sections,
+    std::vector<VendorTagSection>* aidl_sections) {
+  if (aidl_sections == nullptr) {
+    ALOGE("%s: aidl_sections is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hidl_cost->resourceCost = hal_cost.resource_cost;
-  hidl_cost->conflictingDevices.resize(hal_cost.conflicting_devices.size());
+  aidl_sections->resize(hal_sections.size());
+  for (uint32_t i = 0; i < hal_sections.size(); i++) {
+    (*aidl_sections)[i].sectionName = hal_sections[i].section_name;
+    (*aidl_sections)[i].tags.resize(hal_sections[i].tags.size());
+
+    for (uint32_t j = 0; j < hal_sections[i].tags.size(); j++) {
+      (*aidl_sections)[i].tags[j].tagId = hal_sections[i].tags[j].tag_id;
+      (*aidl_sections)[i].tags[j].tagName = hal_sections[i].tags[j].tag_name;
+      status_t res =
+          ConvertToAidlVendorTagType(hal_sections[i].tags[j].tag_type,
+                                     &(*aidl_sections)[i].tags[j].tagType);
+      if (res != OK) {
+        ALOGE("%s: Converting to aidl vendor tag type failed. ", __FUNCTION__);
+        return res;
+      }
+    }
+  }
+  return OK;
+}
+
+status_t ConvertToAidlResourceCost(
+    const google_camera_hal::CameraResourceCost& hal_cost,
+    CameraResourceCost* aidl_cost) {
+  if (aidl_cost == nullptr) {
+    ALOGE("%s: aidl_cost is nullptr.", __FUNCTION__);
+    return BAD_VALUE;
+  }
+
+  aidl_cost->resourceCost = hal_cost.resource_cost;
+  aidl_cost->conflictingDevices.resize(hal_cost.conflicting_devices.size());
 
   for (uint32_t i = 0; i < hal_cost.conflicting_devices.size(); i++) {
-    hidl_cost->conflictingDevices[i] =
-        "device@" + HidlCameraDevice::kDeviceVersion + "/" +
-        HidlCameraProvider::kProviderName + "/" +
+    aidl_cost->conflictingDevices[i] =
+        "device@" + AidlCameraDevice::kDeviceVersion + "/" +
+        AidlCameraProvider::kProviderName + "/" +
         std::to_string(hal_cost.conflicting_devices[i]);
   }
 
   return OK;
 }
 
-status_t ConvertToHidlVendorTagSections(
-    const std::vector<google_camera_hal::VendorTagSection>& hal_sections,
-    hidl_vec<VendorTagSection>* hidl_sections) {
-  if (hidl_sections == nullptr) {
-    ALOGE("%s: hidl_sections is nullptr.", __FUNCTION__);
-    return BAD_VALUE;
-  }
-
-  hidl_sections->resize(hal_sections.size());
-  for (uint32_t i = 0; i < hal_sections.size(); i++) {
-    (*hidl_sections)[i].sectionName = hal_sections[i].section_name;
-    (*hidl_sections)[i].tags.resize(hal_sections[i].tags.size());
-
-    for (uint32_t j = 0; j < hal_sections[i].tags.size(); j++) {
-      (*hidl_sections)[i].tags[j].tagId = hal_sections[i].tags[j].tag_id;
-      (*hidl_sections)[i].tags[j].tagName = hal_sections[i].tags[j].tag_name;
-      status_t res =
-          ConvertToHidlVendorTagType(hal_sections[i].tags[j].tag_type,
-                                     &(*hidl_sections)[i].tags[j].tagType);
-      if (res != OK) {
-        ALOGE("%s: Converting to hidl vendor tag type failed. ", __FUNCTION__);
-        return res;
-      }
-    }
-  }
-
-  return OK;
-}
-
-Status ConvertToHidlStatus(status_t hal_status) {
-  switch (hal_status) {
-    case OK:
-      return Status::OK;
-    case BAD_VALUE:
-      return Status::ILLEGAL_ARGUMENT;
-    case -EBUSY:
-      return Status::CAMERA_IN_USE;
-    case -EUSERS:
-      return Status::MAX_CAMERAS_IN_USE;
-    case UNKNOWN_TRANSACTION:
-      return Status::METHOD_NOT_SUPPORTED;
-    case INVALID_OPERATION:
-      return Status::OPERATION_NOT_SUPPORTED;
-    case DEAD_OBJECT:
-      return Status::CAMERA_DISCONNECTED;
-    default:
-      return Status::INTERNAL_ERROR;
-  }
-}
-
 status_t ConvertToHalTemplateType(
-    RequestTemplate hidl_template,
+    RequestTemplate aidl_template,
     google_camera_hal::RequestTemplate* hal_template) {
   if (hal_template == nullptr) {
     ALOGE("%s: hal_template is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_template) {
+  switch (aidl_template) {
     case RequestTemplate::PREVIEW:
       *hal_template = google_camera_hal::RequestTemplate::kPreview;
       break;
@@ -172,50 +175,50 @@ status_t ConvertToHalTemplateType(
       *hal_template = google_camera_hal::RequestTemplate::kManual;
       break;
     default:
-      ALOGE("%s: Unknown HIDL RequestTemplate: %u", __FUNCTION__,
-            hidl_template);
+      ALOGE("%s: Unknown AIDL RequestTemplate: %u", __FUNCTION__, aidl_template);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-status_t ConvertToHidlHalStreamConfig(
+status_t ConvertToAidlHalStreamConfig(
     const std::vector<google_camera_hal::HalStream>& hal_configured_streams,
-    HalStreamConfiguration* hidl_hal_stream_config) {
-  if (hidl_hal_stream_config == nullptr) {
-    ALOGE("%s: hidl_hal_stream_config is nullptr.", __FUNCTION__);
+    std::vector<HalStream>* aidl_hal_streams) {
+  if (aidl_hal_streams == nullptr) {
+    ALOGE("%s: aidl_hal_streams is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hidl_hal_stream_config->streams.resize(hal_configured_streams.size());
+  aidl_hal_streams->resize(hal_configured_streams.size());
 
   for (uint32_t i = 0; i < hal_configured_streams.size(); i++) {
-    hidl_hal_stream_config->streams[i].supportOffline = false;
+    auto& dst = (*aidl_hal_streams)[i];
+    dst.supportOffline = false;
     if (hal_configured_streams[i].is_physical_camera_stream) {
-      hidl_hal_stream_config->streams[i].v3_4.physicalCameraId =
+      dst.physicalCameraId =
           std::to_string(hal_configured_streams[i].physical_camera_id);
     }
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.overrideDataSpace =
-        hal_configured_streams[i].override_data_space;
+    dst.overrideDataSpace =
+        static_cast<aidl::android::hardware::graphics::common::Dataspace>(
+            hal_configured_streams[i].override_data_space);
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.v3_2.id =
-        hal_configured_streams[i].id;
+    dst.id = hal_configured_streams[i].id;
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.v3_2.overrideFormat =
-        (::android::hardware::graphics::common::V1_0::PixelFormat)
-            hal_configured_streams[i]
-                .override_format;
+    dst.overrideFormat =
+        static_cast<aidl::android::hardware::graphics::common::PixelFormat>(
+            hal_configured_streams[i].override_format);
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.v3_2.producerUsage =
-        hal_configured_streams[i].producer_usage;
+    dst.producerUsage =
+        static_cast<aidl::android::hardware::graphics::common::BufferUsage>(
+            hal_configured_streams[i].producer_usage);
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.v3_2.consumerUsage =
-        hal_configured_streams[i].consumer_usage;
+    dst.consumerUsage =
+        static_cast<aidl::android::hardware::graphics::common::BufferUsage>(
+            hal_configured_streams[i].consumer_usage);
 
-    hidl_hal_stream_config->streams[i].v3_4.v3_3.v3_2.maxBuffers =
-        hal_configured_streams[i].max_buffers;
+    dst.maxBuffers = hal_configured_streams[i].max_buffers;
   }
 
   return OK;
@@ -223,7 +226,7 @@ status_t ConvertToHidlHalStreamConfig(
 
 status_t WriteToResultMetadataQueue(
     camera_metadata_t* metadata,
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* result_metadata_queue) {
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* result_metadata_queue) {
   if (result_metadata_queue == nullptr) {
     return BAD_VALUE;
   }
@@ -235,7 +238,7 @@ status_t WriteToResultMetadataQueue(
 
   uint32_t size = get_camera_metadata_size(metadata);
   bool success = result_metadata_queue->write(
-      reinterpret_cast<const uint8_t*>(metadata), size);
+      reinterpret_cast<const int8_t*>(metadata), size);
   if (!success) {
     ALOGW("%s: Writing to result metadata queue failed. (size=%u)",
           __FUNCTION__, size);
@@ -249,7 +252,7 @@ status_t WriteToResultMetadataQueue(
 // the metadata to the caller in out_hal_metadata.
 status_t TryWritingToResultMetadataQueue(
     std::unique_ptr<google_camera_hal::HalCameraMetadata> hal_metadata,
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* result_metadata_queue,
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* result_metadata_queue,
     uint64_t* fmq_result_size,
     std::unique_ptr<google_camera_hal::HalCameraMetadata>* out_hal_metadata) {
   if (out_hal_metadata == nullptr) {
@@ -285,43 +288,44 @@ status_t TryWritingToResultMetadataQueue(
   return OK;
 }
 
-status_t ConverToHidlResultMetadata(
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* result_metadata_queue,
+status_t ConvertToAidlResultMetadata(
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* result_metadata_queue,
     std::unique_ptr<google_camera_hal::HalCameraMetadata> hal_metadata,
-    CameraMetadata* hidl_metadata, uint64_t* fmq_result_size) {
+    std::vector<uint8_t>* aidl_metadata, uint64_t* fmq_result_size) {
   if (TryWritingToResultMetadataQueue(std::move(hal_metadata),
                                       result_metadata_queue, fmq_result_size,
                                       &hal_metadata) == OK) {
     return OK;
   }
 
-  // If writing to metadata queue failed, attach the metadata to hidl_metadata.
-  if (hidl_metadata == nullptr) {
-    ALOGE("%s: hidl_metadata is nullptr", __FUNCTION__);
+  // If writing to metadata queue failed, attach the metadata to aidl_metadata.
+  if (aidl_metadata == nullptr) {
+    ALOGE("%s: aidl_metadata is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
   uint32_t metadata_size = hal_metadata->GetCameraMetadataSize();
-  hidl_metadata->setToExternal(
-      reinterpret_cast<uint8_t*>(hal_metadata->ReleaseCameraMetadata()),
-      metadata_size, /*shouldOwn=*/true);
+  uint8_t* metadata_p =
+      reinterpret_cast<uint8_t*>(hal_metadata->ReleaseCameraMetadata());
+  // TODO: Do we reallly need to copy here ?
+  aidl_metadata->assign(metadata_p, metadata_p + metadata_size);
 
   return OK;
 }
 
-status_t ConvertToHidlBufferStatus(google_camera_hal::BufferStatus hal_status,
-                                   BufferStatus* hidl_status) {
-  if (hidl_status == nullptr) {
-    ALOGE("%s: hidl_status is nullptr.", __FUNCTION__);
+status_t ConvertToAidlBufferStatus(google_camera_hal::BufferStatus hal_status,
+                                   BufferStatus* aidl_status) {
+  if (aidl_status == nullptr) {
+    ALOGE("%s: aidl_status is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
   switch (hal_status) {
     case google_camera_hal::BufferStatus::kOk:
-      *hidl_status = BufferStatus::OK;
+      *aidl_status = BufferStatus::OK;
       break;
     case google_camera_hal::BufferStatus::kError:
-      *hidl_status = BufferStatus::ERROR;
+      *aidl_status = BufferStatus::ERROR;
       break;
     default:
       ALOGE("%s: Unknown HAL buffer status: %u", __FUNCTION__, hal_status);
@@ -331,37 +335,44 @@ status_t ConvertToHidlBufferStatus(google_camera_hal::BufferStatus hal_status,
   return OK;
 }
 
-status_t ConvertToHidlStreamBuffer(
+aidl::android::hardware::common::NativeHandle makeToAidlIfNotNull(
+    const native_handle_t* nh) {
+  if (nh == nullptr) {
+    return aidl::android::hardware::common::NativeHandle();
+  }
+  return makeToAidl(nh);
+}
+
+status_t ConvertToAidlStreamBuffer(
     const google_camera_hal::StreamBuffer& hal_buffer,
-    StreamBuffer* hidl_buffer) {
-  if (hidl_buffer == nullptr) {
-    ALOGE("%s: hidl_buffer is nullptr", __FUNCTION__);
+    StreamBuffer* aidl_buffer) {
+  if (aidl_buffer == nullptr) {
+    ALOGE("%s: aidl_buffer is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hidl_buffer->streamId = hal_buffer.stream_id;
-  hidl_buffer->bufferId = hal_buffer.buffer_id;
-  hidl_buffer->buffer = nullptr;
+  aidl_buffer->streamId = hal_buffer.stream_id;
+  aidl_buffer->bufferId = hal_buffer.buffer_id;
+  aidl_buffer->buffer = aidl::android::hardware::common::NativeHandle();
 
   status_t res =
-      ConvertToHidlBufferStatus(hal_buffer.status, &hidl_buffer->status);
+      ConvertToAidlBufferStatus(hal_buffer.status, &aidl_buffer->status);
   if (res != OK) {
-    ALOGE("%s: Converting to HIDL buffer status failed: %s(%d)", __FUNCTION__,
+    ALOGE("%s: Converting to AIDL buffer status failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
     return res;
   }
 
-  hidl_buffer->acquireFence = nullptr;
-  hidl_buffer->releaseFence = hal_buffer.release_fence;
+  aidl_buffer->acquireFence = aidl::android::hardware::common::NativeHandle();
+  aidl_buffer->releaseFence = makeToAidlIfNotNull(hal_buffer.release_fence);
   return OK;
 }
 
-status_t ConvertToHidlCaptureResult_V3_2(
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* result_metadata_queue,
-    google_camera_hal::CaptureResult* hal_result,
-    device::V3_2::CaptureResult* hidl_result) {
-  if (hidl_result == nullptr) {
-    ALOGE("%s: hidl_result is nullptr.", __FUNCTION__);
+status_t ConvertToAidlCaptureResultInternal(
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* result_metadata_queue,
+    google_camera_hal::CaptureResult* hal_result, CaptureResult* aidl_result) {
+  if (aidl_result == nullptr) {
+    ALOGE("%s: aidl_result is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
@@ -370,23 +381,23 @@ status_t ConvertToHidlCaptureResult_V3_2(
     return BAD_VALUE;
   }
 
-  hidl_result->frameNumber = hal_result->frame_number;
+  aidl_result->frameNumber = hal_result->frame_number;
 
-  status_t res = ConverToHidlResultMetadata(
+  status_t res = ConvertToAidlResultMetadata(
       result_metadata_queue, std::move(hal_result->result_metadata),
-      &hidl_result->result, &hidl_result->fmqResultSize);
+      &aidl_result->result.metadata, (uint64_t*)&aidl_result->fmqResultSize);
   if (res != OK) {
-    ALOGE("%s: Converting to HIDL result metadata failed: %s(%d).",
+    ALOGE("%s: Converting to AIDL result metadata failed: %s(%d).",
           __FUNCTION__, strerror(-res), res);
     return res;
   }
 
-  hidl_result->outputBuffers.resize(hal_result->output_buffers.size());
-  for (uint32_t i = 0; i < hidl_result->outputBuffers.size(); i++) {
-    res = ConvertToHidlStreamBuffer(hal_result->output_buffers[i],
-                                    &hidl_result->outputBuffers[i]);
+  aidl_result->outputBuffers.resize(hal_result->output_buffers.size());
+  for (uint32_t i = 0; i < aidl_result->outputBuffers.size(); i++) {
+    res = ConvertToAidlStreamBuffer(hal_result->output_buffers[i],
+                                    &aidl_result->outputBuffers[i]);
     if (res != OK) {
-      ALOGE("%s: Converting to HIDL output stream buffer failed: %s(%d)",
+      ALOGE("%s: Converting to AIDL output stream buffer failed: %s(%d)",
             __FUNCTION__, strerror(-res), res);
       return res;
     }
@@ -399,27 +410,27 @@ status_t ConvertToHidlCaptureResult_V3_2(
             __FUNCTION__, num_input_buffers);
     }
 
-    res = ConvertToHidlStreamBuffer(hal_result->input_buffers[0],
-                                    &hidl_result->inputBuffer);
+    res = ConvertToAidlStreamBuffer(hal_result->input_buffers[0],
+                                    &aidl_result->inputBuffer);
     if (res != OK) {
-      ALOGE("%s: Converting to HIDL input stream buffer failed: %s(%d)",
+      ALOGE("%s: Converting to AIDL input stream buffer failed: %s(%d)",
             __FUNCTION__, strerror(-res), res);
       return res;
     }
   } else {
-    hidl_result->inputBuffer.streamId = -1;
+    aidl_result->inputBuffer.streamId = -1;
   }
 
-  hidl_result->partialResult = hal_result->partial_result;
+  aidl_result->partialResult = hal_result->partial_result;
   return OK;
 }
 
-status_t ConvertToHidlCaptureResult(
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* result_metadata_queue,
+status_t ConvertToAidlCaptureResult(
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* result_metadata_queue,
     std::unique_ptr<google_camera_hal::CaptureResult> hal_result,
-    CaptureResult* hidl_result) {
-  if (hidl_result == nullptr) {
-    ALOGE("%s: hidl_result is nullptr.", __FUNCTION__);
+    CaptureResult* aidl_result) {
+  if (aidl_result == nullptr) {
+    ALOGE("%s: aidl_result is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
@@ -428,28 +439,28 @@ status_t ConvertToHidlCaptureResult(
     return BAD_VALUE;
   }
 
-  status_t res = ConvertToHidlCaptureResult_V3_2(
-      result_metadata_queue, hal_result.get(), &hidl_result->v3_2);
+  status_t res = ConvertToAidlCaptureResultInternal(
+      result_metadata_queue, hal_result.get(), aidl_result);
   if (res != OK) {
-    ALOGE("%s: Converting to V3.2 HIDL result failed: %s(%d).", __FUNCTION__,
-          strerror(-res), res);
+    ALOGE("%s: Converting to AIDL result internal failed: %s(%d).",
+          __FUNCTION__, strerror(-res), res);
     return res;
   }
 
   uint32_t num_physical_metadata = hal_result->physical_metadata.size();
-  hidl_result->physicalCameraMetadata.resize(num_physical_metadata);
+  aidl_result->physicalCameraMetadata.resize(num_physical_metadata);
 
   for (uint32_t i = 0; i < num_physical_metadata; i++) {
-    hidl_result->physicalCameraMetadata[i].physicalCameraId =
+    aidl_result->physicalCameraMetadata[i].physicalCameraId =
         std::to_string(hal_result->physical_metadata[i].physical_camera_id);
 
-    res = ConverToHidlResultMetadata(
+    res = ConvertToAidlResultMetadata(
         result_metadata_queue,
         std::move(hal_result->physical_metadata[i].metadata),
-        &hidl_result->physicalCameraMetadata[i].metadata,
-        &hidl_result->physicalCameraMetadata[i].fmqMetadataSize);
+        &aidl_result->physicalCameraMetadata[i].metadata.metadata,
+        (uint64_t*)&aidl_result->physicalCameraMetadata[i].fmqMetadataSize);
     if (res != OK) {
-      ALOGE("%s: Converting to HIDL physical metadata failed: %s(%d).",
+      ALOGE("%s: Converting to AIDL physical metadata failed: %s(%d).",
             __FUNCTION__, strerror(-res), res);
       return res;
     }
@@ -458,76 +469,77 @@ status_t ConvertToHidlCaptureResult(
   return OK;
 }
 
-status_t ConvertToHidlErrorMessage(
-    const google_camera_hal::ErrorMessage& hal_error, ErrorMsg* hidl_error) {
-  if (hidl_error == nullptr) {
-    ALOGE("%s: hidl_error is nullptr.", __FUNCTION__);
+status_t ConvertToAidlErrorMessage(
+    const google_camera_hal::ErrorMessage& hal_error, NotifyMsg* aidl_msg) {
+  using Tag = aidl::android::hardware::camera::device::NotifyMsg::Tag;
+  if (aidl_msg == nullptr) {
+    ALOGE("%s: aidl_msg is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hidl_error->frameNumber = hal_error.frame_number;
-  hidl_error->errorStreamId = hal_error.error_stream_id;
+  ErrorMsg aidl_error;
+  aidl_error.frameNumber = hal_error.frame_number;
+  aidl_error.errorStreamId = hal_error.error_stream_id;
 
   switch (hal_error.error_code) {
     case google_camera_hal::ErrorCode::kErrorDevice:
-      hidl_error->errorCode = ErrorCode::ERROR_DEVICE;
+      aidl_error.errorCode = ErrorCode::ERROR_DEVICE;
       break;
     case google_camera_hal::ErrorCode::kErrorRequest:
-      hidl_error->errorCode = ErrorCode::ERROR_REQUEST;
+      aidl_error.errorCode = ErrorCode::ERROR_REQUEST;
       break;
     case google_camera_hal::ErrorCode::kErrorResult:
-      hidl_error->errorCode = ErrorCode::ERROR_RESULT;
+      aidl_error.errorCode = ErrorCode::ERROR_RESULT;
       break;
     case google_camera_hal::ErrorCode::kErrorBuffer:
-      hidl_error->errorCode = ErrorCode::ERROR_BUFFER;
+      aidl_error.errorCode = ErrorCode::ERROR_BUFFER;
       break;
     default:
       ALOGE("%s: Unknown error code: %u", __FUNCTION__, hal_error.error_code);
       return BAD_VALUE;
   }
-
+  aidl_msg->set<Tag::error>(aidl_error);
   return OK;
 }
 
-status_t ConvertToHidlShutterMessage(
-    const google_camera_hal::ShutterMessage& hal_shutter,
-    ShutterMsg* hidl_shutter) {
-  if (hidl_shutter == nullptr) {
-    ALOGE("%s: hidl_shutter is nullptr.", __FUNCTION__);
+status_t ConvertToAidlShutterMessage(
+    const google_camera_hal::ShutterMessage& hal_shutter, NotifyMsg* aidl_msg) {
+  using Tag = aidl::android::hardware::camera::device::NotifyMsg::Tag;
+  if (aidl_msg == nullptr) {
+    ALOGE("%s: aidl_msg is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
-
-  hidl_shutter->frameNumber = hal_shutter.frame_number;
-  hidl_shutter->timestamp = hal_shutter.timestamp_ns;
+  ShutterMsg aidl_shutter;
+  aidl_shutter.frameNumber = hal_shutter.frame_number;
+  aidl_shutter.timestamp = hal_shutter.timestamp_ns;
+  aidl_shutter.readoutTimestamp = hal_shutter.readout_timestamp_ns;
+  aidl_msg->set<Tag::shutter>(aidl_shutter);
   return OK;
 }
 
-status_t ConverToHidlNotifyMessage(
+status_t ConverToAidlNotifyMessage(
     const google_camera_hal::NotifyMessage& hal_message,
-    NotifyMsg* hidl_message) {
-  if (hidl_message == nullptr) {
-    ALOGE("%s: hidl_message is nullptr.", __FUNCTION__);
+    NotifyMsg* aidl_message) {
+  if (aidl_message == nullptr) {
+    ALOGE("%s: aidl_message is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
   status_t res;
   switch (hal_message.type) {
     case google_camera_hal::MessageType::kError:
-      hidl_message->type = MsgType::ERROR;
-      res = ConvertToHidlErrorMessage(hal_message.message.error,
-                                      &hidl_message->msg.error);
+      res = ConvertToAidlErrorMessage(hal_message.message.error, aidl_message);
       if (res != OK) {
-        ALOGE("%s: Converting to HIDL error message failed: %s(%d)",
+        ALOGE("%s: Converting to AIDL error message failed: %s(%d)",
               __FUNCTION__, strerror(-res), res);
         return res;
       }
       break;
     case google_camera_hal::MessageType::kShutter:
-      hidl_message->type = MsgType::SHUTTER;
-      res = ConvertToHidlShutterMessage(hal_message.message.shutter,
-                                        &hidl_message->msg.shutter);
+      res = ConvertToAidlShutterMessage(hal_message.message.shutter,
+                                        aidl_message);
       if (res != OK) {
-        ALOGE("%s: Converting to HIDL shutter message failed: %s(%d)",
+        ALOGE("%s: Converting to AIDL shutter message failed: %s(%d)",
               __FUNCTION__, strerror(-res), res);
         return res;
       }
@@ -540,23 +552,23 @@ status_t ConverToHidlNotifyMessage(
   return OK;
 }
 
-status_t ConvertToHidlCameraDeviceStatus(
+status_t ConvertToAidlCameraDeviceStatus(
     google_camera_hal::CameraDeviceStatus hal_camera_device_status,
-    CameraDeviceStatus* hidl_camera_device_status) {
-  if (hidl_camera_device_status == nullptr) {
-    ALOGE("%s: hidl_camera_device_status is nullptr.", __FUNCTION__);
+    CameraDeviceStatus* aidl_camera_device_status) {
+  if (aidl_camera_device_status == nullptr) {
+    ALOGE("%s: aidl_camera_device_status is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
   switch (hal_camera_device_status) {
     case google_camera_hal::CameraDeviceStatus::kNotPresent:
-      *hidl_camera_device_status = CameraDeviceStatus::NOT_PRESENT;
+      *aidl_camera_device_status = CameraDeviceStatus::NOT_PRESENT;
       break;
     case google_camera_hal::CameraDeviceStatus::kPresent:
-      *hidl_camera_device_status = CameraDeviceStatus::PRESENT;
+      *aidl_camera_device_status = CameraDeviceStatus::PRESENT;
       break;
     case google_camera_hal::CameraDeviceStatus::kEnumerating:
-      *hidl_camera_device_status = CameraDeviceStatus::ENUMERATING;
+      *aidl_camera_device_status = CameraDeviceStatus::ENUMERATING;
       break;
     default:
       ALOGE("%s: Unknown HAL camera device status: %u", __FUNCTION__,
@@ -567,23 +579,23 @@ status_t ConvertToHidlCameraDeviceStatus(
   return OK;
 }
 
-status_t ConvertToHidlTorchModeStatus(
+status_t ConvertToAidlTorchModeStatus(
     google_camera_hal::TorchModeStatus hal_torch_status,
-    TorchModeStatus* hidl_torch_status) {
-  if (hidl_torch_status == nullptr) {
-    ALOGE("%s: hidl_torch_status is nullptr.", __FUNCTION__);
+    TorchModeStatus* aidl_torch_status) {
+  if (aidl_torch_status == nullptr) {
+    ALOGE("%s: aidl_torch_status is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
   switch (hal_torch_status) {
     case google_camera_hal::TorchModeStatus::kNotAvailable:
-      *hidl_torch_status = TorchModeStatus::NOT_AVAILABLE;
+      *aidl_torch_status = TorchModeStatus::NOT_AVAILABLE;
       break;
     case google_camera_hal::TorchModeStatus::kAvailableOff:
-      *hidl_torch_status = TorchModeStatus::AVAILABLE_OFF;
+      *aidl_torch_status = TorchModeStatus::AVAILABLE_OFF;
       break;
     case google_camera_hal::TorchModeStatus::kAvailableOn:
-      *hidl_torch_status = TorchModeStatus::AVAILABLE_ON;
+      *aidl_torch_status = TorchModeStatus::AVAILABLE_ON;
       break;
     default:
       ALOGE("%s: Unknown HAL torch mode status: %u", __FUNCTION__,
@@ -594,31 +606,31 @@ status_t ConvertToHidlTorchModeStatus(
   return OK;
 }
 
-status_t ConvertToHidlBufferRequest(
+status_t ConvertToAidlBufferRequest(
     const std::vector<google_camera_hal::BufferRequest>& hal_buffer_requests,
-    hidl_vec<BufferRequest>* hidl_buffer_requests) {
-  if (hidl_buffer_requests == nullptr) {
-    ALOGE("%s: hidl_buffer_request is nullptr.", __FUNCTION__);
+    std::vector<BufferRequest>* aidl_buffer_requests) {
+  if (aidl_buffer_requests == nullptr) {
+    ALOGE("%s: aidl_buffer_request is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hidl_buffer_requests->resize(hal_buffer_requests.size());
+  aidl_buffer_requests->resize(hal_buffer_requests.size());
   for (uint32_t i = 0; i < hal_buffer_requests.size(); i++) {
-    (*hidl_buffer_requests)[i].streamId = hal_buffer_requests[i].stream_id;
-    (*hidl_buffer_requests)[i].numBuffersRequested =
+    (*aidl_buffer_requests)[i].streamId = hal_buffer_requests[i].stream_id;
+    (*aidl_buffer_requests)[i].numBuffersRequested =
         hal_buffer_requests[i].num_buffers_requested;
   }
   return OK;
 }
 
-status_t ConvertToHalBufferStatus(BufferStatus hidl_status,
+status_t ConvertToHalBufferStatus(BufferStatus aidl_status,
                                   google_camera_hal::BufferStatus* hal_status) {
   if (hal_status == nullptr) {
     ALOGE("%s: hal_status is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_status) {
+  switch (aidl_status) {
     case BufferStatus::OK:
       *hal_status = google_camera_hal::BufferStatus::kOk;
       break;
@@ -626,42 +638,71 @@ status_t ConvertToHalBufferStatus(BufferStatus hidl_status,
       *hal_status = google_camera_hal::BufferStatus::kError;
       break;
     default:
-      ALOGE("%s: Unknown HIDL buffer status: %u", __FUNCTION__, hidl_status);
+      ALOGE("%s: Unknown AIDL buffer status: %u", __FUNCTION__, aidl_status);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-status_t ConvertToHalStreamBuffer(const StreamBuffer& hidl_buffer,
-                                  google_camera_hal::StreamBuffer* hal_buffer) {
-  if (hal_buffer == nullptr) {
-    ALOGE("%s: hal_buffer is nullptr.", __FUNCTION__);
+bool IsAidlNativeHandleNull(const NativeHandle& handle) {
+  return (handle.fds.size() == 0 && handle.ints.size() == 0);
+}
+
+native_handle_t* makeFromAidlIfNotNull(const NativeHandle& handle) {
+  if (IsAidlNativeHandleNull(handle)) {
+    return nullptr;
+  }
+  return makeFromAidl(handle);
+}
+
+// We have a handles_to_delete parameter since makeFromAidl creates a
+// native_handle_t
+status_t ConvertToHalStreamBuffer(
+    const StreamBuffer& aidl_buffer, google_camera_hal::StreamBuffer* hal_buffer,
+    std::vector<native_handle_t*>* handles_to_delete) {
+  if (hal_buffer == nullptr || handles_to_delete == nullptr) {
+    ALOGE("%s: hal_buffer / handles_to_delete is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hal_buffer->stream_id = hidl_buffer.streamId;
-  hal_buffer->buffer_id = hidl_buffer.bufferId;
-  hal_buffer->buffer = hidl_buffer.buffer.getNativeHandle();
+  hal_buffer->stream_id = aidl_buffer.streamId;
+  hal_buffer->buffer_id = aidl_buffer.bufferId;
+  native_handle_t* buf_handle = makeFromAidlIfNotNull(aidl_buffer.buffer);
+  hal_buffer->buffer = buf_handle;
+  if (buf_handle != nullptr) {
+    handles_to_delete->emplace_back(buf_handle);
+  }
 
   status_t res =
-      ConvertToHalBufferStatus(hidl_buffer.status, &hal_buffer->status);
+      ConvertToHalBufferStatus(aidl_buffer.status, &hal_buffer->status);
   if (res != OK) {
     ALOGE("%s: Converting to HAL buffer status failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
     return res;
   }
 
-  hal_buffer->acquire_fence = hidl_buffer.acquireFence.getNativeHandle();
-  hal_buffer->release_fence = hidl_buffer.releaseFence.getNativeHandle();
+  native_handle_t* acquire_handle =
+      makeFromAidlIfNotNull(aidl_buffer.acquireFence);
+  native_handle_t* release_handle =
+      makeFromAidlIfNotNull(aidl_buffer.releaseFence);
+  hal_buffer->acquire_fence = acquire_handle;
+  hal_buffer->release_fence = release_handle;
+  if (acquire_handle != nullptr) {
+    handles_to_delete->emplace_back(acquire_handle);
+  }
+
+  if (release_handle != nullptr) {
+    handles_to_delete->emplace_back(release_handle);
+  }
 
   return OK;
 }
 
 status_t ConvertToHalMetadata(
     uint32_t message_queue_setting_size,
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* request_metadata_queue,
-    const CameraMetadata& request_settings,
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* request_metadata_queue,
+    const std::vector<uint8_t>& request_settings,
     std::unique_ptr<google_camera_hal::HalCameraMetadata>* hal_metadata) {
   if (hal_metadata == nullptr) {
     ALOGE("%s: hal_metadata is nullptr.", __FUNCTION__);
@@ -669,7 +710,7 @@ status_t ConvertToHalMetadata(
   }
 
   const camera_metadata_t* metadata = nullptr;
-  CameraMetadata metadata_queue_settings;
+  std::vector<int8_t> metadata_queue_settings;
 
   if (message_queue_setting_size == 0) {
     // Use the settings in the request.
@@ -706,19 +747,20 @@ status_t ConvertToHalMetadata(
 }
 
 status_t ConvertToHalCaptureRequest(
-    const CaptureRequest& hidl_request,
-    MessageQueue<uint8_t, kSynchronizedReadWrite>* request_metadata_queue,
-    google_camera_hal::CaptureRequest* hal_request) {
+    const CaptureRequest& aidl_request,
+    AidlMessageQueue<int8_t, SynchronizedReadWrite>* request_metadata_queue,
+    google_camera_hal::CaptureRequest* hal_request,
+    std::vector<native_handle_t*>* handles_to_delete) {
   if (hal_request == nullptr) {
     ALOGE("%s: hal_request is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  hal_request->frame_number = hidl_request.v3_4.v3_2.frameNumber;
+  hal_request->frame_number = aidl_request.frameNumber;
 
   status_t res = ConvertToHalMetadata(
-      hidl_request.v3_4.v3_2.fmqSettingsSize, request_metadata_queue,
-      hidl_request.v3_4.v3_2.settings, &hal_request->settings);
+      aidl_request.fmqSettingsSize, request_metadata_queue,
+      aidl_request.settings.metadata, &hal_request->settings);
   if (res != OK) {
     ALOGE("%s: Converting metadata failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
@@ -726,9 +768,9 @@ status_t ConvertToHalCaptureRequest(
   }
 
   google_camera_hal::StreamBuffer hal_buffer = {};
-  if (hidl_request.v3_4.v3_2.inputBuffer.buffer != nullptr) {
-    res = ConvertToHalStreamBuffer(hidl_request.v3_4.v3_2.inputBuffer,
-                                   &hal_buffer);
+  if (!IsAidlNativeHandleNull(aidl_request.inputBuffer.buffer)) {
+    res = ConvertToHalStreamBuffer(aidl_request.inputBuffer, &hal_buffer,
+                                   handles_to_delete);
     if (res != OK) {
       ALOGE("%s: Converting hal stream buffer failed: %s(%d)", __FUNCTION__,
             strerror(-res), res);
@@ -736,13 +778,14 @@ status_t ConvertToHalCaptureRequest(
     }
 
     hal_request->input_buffers.push_back(hal_buffer);
-    hal_request->input_width = hidl_request.inputWidth;
-    hal_request->input_height = hidl_request.inputHeight;
+    hal_request->input_width = aidl_request.inputWidth;
+    hal_request->input_height = aidl_request.inputHeight;
   }
 
-  for (auto& buffer : hidl_request.v3_4.v3_2.outputBuffers) {
+  for (auto& buffer : aidl_request.outputBuffers) {
     hal_buffer = {};
-    status_t res = ConvertToHalStreamBuffer(buffer, &hal_buffer);
+    status_t res =
+        ConvertToHalStreamBuffer(buffer, &hal_buffer, handles_to_delete);
     if (res != OK) {
       ALOGE("%s: Converting hal stream buffer failed: %s(%d)", __FUNCTION__,
             strerror(-res), res);
@@ -752,18 +795,18 @@ status_t ConvertToHalCaptureRequest(
     hal_request->output_buffers.push_back(hal_buffer);
   }
 
-  for (auto hidl_physical_settings : hidl_request.v3_4.physicalCameraSettings) {
+  for (auto aidl_physical_settings : aidl_request.physicalCameraSettings) {
     std::unique_ptr<google_camera_hal::HalCameraMetadata> hal_physical_settings;
     res = ConvertToHalMetadata(
-        hidl_physical_settings.fmqSettingsSize, request_metadata_queue,
-        hidl_physical_settings.settings, &hal_physical_settings);
+        aidl_physical_settings.fmqSettingsSize, request_metadata_queue,
+        aidl_physical_settings.settings.metadata, &hal_physical_settings);
     if (res != OK) {
       ALOGE("%s: Converting to HAL metadata failed: %s(%d)", __FUNCTION__,
             strerror(-res), res);
       return res;
     }
 
-    uint32_t camera_id = std::stoul(hidl_physical_settings.physicalCameraId);
+    uint32_t camera_id = std::stoul(aidl_physical_settings.physicalCameraId);
     hal_request->physical_camera_settings.emplace(
         camera_id, std::move(hal_physical_settings));
   }
@@ -772,17 +815,17 @@ status_t ConvertToHalCaptureRequest(
 }
 
 status_t ConvertToHalBufferCaches(
-    const hidl_vec<BufferCache>& hidl_buffer_caches,
+    const std::vector<BufferCache>& aidl_buffer_caches,
     std::vector<google_camera_hal::BufferCache>* hal_buffer_caches) {
   if (hal_buffer_caches == nullptr) {
     ALOGE("%s: hal_buffer_caches is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  for (auto hidl_cache : hidl_buffer_caches) {
+  for (auto aidl_cache : aidl_buffer_caches) {
     google_camera_hal::BufferCache hal_cache;
-    hal_cache.stream_id = hidl_cache.streamId;
-    hal_cache.buffer_id = hidl_cache.bufferId;
+    hal_cache.stream_id = aidl_cache.streamId;
+    hal_cache.buffer_id = aidl_cache.bufferId;
 
     hal_buffer_caches->push_back(hal_cache);
   }
@@ -791,14 +834,14 @@ status_t ConvertToHalBufferCaches(
 }
 
 status_t ConvertToHalStreamConfigurationMode(
-    StreamConfigurationMode hidl_mode,
+    StreamConfigurationMode aidl_mode,
     google_camera_hal::StreamConfigurationMode* hal_mode) {
   if (hal_mode == nullptr) {
     ALOGE("%s: hal_mode is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_mode) {
+  switch (aidl_mode) {
     case StreamConfigurationMode::NORMAL_MODE:
       *hal_mode = google_camera_hal::StreamConfigurationMode::kNormal;
       break;
@@ -807,25 +850,25 @@ status_t ConvertToHalStreamConfigurationMode(
           google_camera_hal::StreamConfigurationMode::kConstrainedHighSpeed;
       break;
     default:
-      ALOGE("%s: Unknown configuration mode %u", __FUNCTION__, hidl_mode);
+      ALOGE("%s: Unknown configuration mode %u", __FUNCTION__, aidl_mode);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-static bool sensorPixelModeContains(const device::V3_7::Stream& hidl_stream,
-                                    uint32_t key) {
-  for (auto& i : hidl_stream.sensorPixelModesUsed) {
-    if (i == static_cast<CameraMetadataEnumAndroidSensorPixelMode>(key)) {
+static bool sensorPixelModeContains(const Stream& aidl_stream, uint32_t key) {
+  using aidl::android::hardware::camera::metadata::SensorPixelMode;
+  for (auto& i : aidl_stream.sensorPixelModesUsed) {
+    if (i == static_cast<SensorPixelMode>(key)) {
       return true;
     }
   }
   return false;
 }
 
-status_t ConverToHalStreamConfig(
-    const StreamConfiguration& hidl_stream_config,
+status_t ConvertToHalStreamConfig(
+    const StreamConfiguration& aidl_stream_config,
     google_camera_hal::StreamConfiguration* hal_stream_config) {
   if (hal_stream_config == nullptr) {
     ALOGE("%s: hal_stream_config is nullptr.", __FUNCTION__);
@@ -834,27 +877,18 @@ status_t ConverToHalStreamConfig(
 
   status_t res;
 
-  for (auto hidl_stream : hidl_stream_config.streams) {
+  for (auto aidl_stream : aidl_stream_config.streams) {
     google_camera_hal::Stream hal_stream;
-    res = ConvertToHalStream(hidl_stream.v3_4, &hal_stream);
+    res = ConvertToHalStream(aidl_stream, &hal_stream);
     if (res != OK) {
       ALOGE("%s: Converting to HAL stream failed: %s(%d)", __FUNCTION__,
             strerror(-res), res);
       return res;
     }
-    hal_stream.group_id = hidl_stream.groupId;
-
-    hal_stream.used_in_max_resolution_mode = sensorPixelModeContains(
-        hidl_stream, ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION);
-    hal_stream.used_in_default_resolution_mode =
-        hidl_stream.sensorPixelModesUsed.size() > 0
-            ? sensorPixelModeContains(hidl_stream,
-                                      ANDROID_SENSOR_PIXEL_MODE_DEFAULT)
-            : true;
     hal_stream_config->streams.push_back(hal_stream);
   }
 
-  res = ConvertToHalStreamConfigurationMode(hidl_stream_config.operationMode,
+  res = ConvertToHalStreamConfigurationMode(aidl_stream_config.operationMode,
                                             &hal_stream_config->operation_mode);
   if (res != OK) {
     ALOGE("%s: Converting to HAL opeation mode failed: %s(%d)", __FUNCTION__,
@@ -862,7 +896,8 @@ status_t ConverToHalStreamConfig(
     return res;
   }
 
-  res = ConvertToHalMetadata(0, nullptr, hidl_stream_config.sessionParams,
+  res = ConvertToHalMetadata(0, nullptr,
+                             aidl_stream_config.sessionParams.metadata,
                              &hal_stream_config->session_params);
   if (res != OK) {
     ALOGE("%s: Converting to HAL metadata failed: %s(%d)", __FUNCTION__,
@@ -871,60 +906,21 @@ status_t ConverToHalStreamConfig(
   }
 
   hal_stream_config->stream_config_counter =
-      hidl_stream_config.streamConfigCounter;
+      aidl_stream_config.streamConfigCounter;
   hal_stream_config->multi_resolution_input_image =
-      hidl_stream_config.multiResolutionInputImage;
+      aidl_stream_config.multiResolutionInputImage;
 
   return OK;
 }
 
-status_t ConverToHalStreamConfig(
-    const device::V3_4::StreamConfiguration& hidl_stream_config,
-    google_camera_hal::StreamConfiguration* hal_stream_config) {
-  if (hal_stream_config == nullptr) {
-    ALOGE("%s: hal_stream_config is nullptr.", __FUNCTION__);
-    return BAD_VALUE;
-  }
-
-  status_t res;
-  for (auto hidl_stream : hidl_stream_config.streams) {
-    google_camera_hal::Stream hal_stream;
-    res = ConvertToHalStream(hidl_stream, &hal_stream);
-    if (res != OK) {
-      ALOGE("%s: Converting to HAL stream failed: %s(%d)", __FUNCTION__,
-            strerror(-res), res);
-      return res;
-    }
-    hal_stream_config->streams.push_back(hal_stream);
-  }
-
-  res = ConvertToHalStreamConfigurationMode(hidl_stream_config.operationMode,
-                                            &hal_stream_config->operation_mode);
-  if (res != OK) {
-    ALOGE("%s: Converting to HAL opeation mode failed: %s(%d)", __FUNCTION__,
-          strerror(-res), res);
-    return res;
-  }
-
-  res = ConvertToHalMetadata(0, nullptr, hidl_stream_config.sessionParams,
-                             &hal_stream_config->session_params);
-  if (res != OK) {
-    ALOGE("%s: Converting to HAL metadata failed: %s(%d)", __FUNCTION__,
-          strerror(-res), res);
-    return res;
-  }
-
-  return OK;
-}
-
-status_t ConvertToHalStreamType(StreamType hidl_stream_type,
+status_t ConvertToHalStreamType(StreamType aidl_stream_type,
                                 google_camera_hal::StreamType* hal_stream_type) {
   if (hal_stream_type == nullptr) {
     ALOGE("%s: hal_stream_type is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_stream_type) {
+  switch (aidl_stream_type) {
     case StreamType::OUTPUT:
       *hal_stream_type = google_camera_hal::StreamType::kOutput;
       break;
@@ -932,7 +928,7 @@ status_t ConvertToHalStreamType(StreamType hidl_stream_type,
       *hal_stream_type = google_camera_hal::StreamType::kInput;
       break;
     default:
-      ALOGE("%s: Unknown stream type: %u", __FUNCTION__, hidl_stream_type);
+      ALOGE("%s: Unknown stream type: %u", __FUNCTION__, aidl_stream_type);
       return BAD_VALUE;
   }
 
@@ -940,14 +936,14 @@ status_t ConvertToHalStreamType(StreamType hidl_stream_type,
 }
 
 status_t ConvertToHalStreamRotation(
-    StreamRotation hidl_stream_rotation,
+    StreamRotation aidl_stream_rotation,
     google_camera_hal::StreamRotation* hal_stream_rotation) {
   if (hal_stream_rotation == nullptr) {
     ALOGE("%s: hal_stream_rotation is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_stream_rotation) {
+  switch (aidl_stream_rotation) {
     case StreamRotation::ROTATION_0:
       *hal_stream_rotation = google_camera_hal::StreamRotation::kRotation0;
       break;
@@ -962,14 +958,14 @@ status_t ConvertToHalStreamRotation(
       break;
     default:
       ALOGE("%s: Unknown stream rotation: %u", __FUNCTION__,
-            hidl_stream_rotation);
+            aidl_stream_rotation);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-status_t ConvertToHalStream(const Stream& hidl_stream,
+status_t ConvertToHalStream(const Stream& aidl_stream,
                             google_camera_hal::Stream* hal_stream) {
   if (hal_stream == nullptr) {
     ALOGE("%s: hal_stream is nullptr.", __FUNCTION__);
@@ -978,73 +974,66 @@ status_t ConvertToHalStream(const Stream& hidl_stream,
 
   *hal_stream = {};
 
-  hal_stream->id = hidl_stream.v3_2.id;
+  hal_stream->id = aidl_stream.id;
 
-  status_t res = ConvertToHalStreamType(hidl_stream.v3_2.streamType,
-                                        &hal_stream->stream_type);
+  status_t res =
+      ConvertToHalStreamType(aidl_stream.streamType, &hal_stream->stream_type);
   if (res != OK) {
     ALOGE("%s: Converting to HAL stream type failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
     return res;
   }
 
-  hal_stream->width = hidl_stream.v3_2.width;
-  hal_stream->height = hidl_stream.v3_2.height;
-  hal_stream->format = (android_pixel_format_t)hidl_stream.v3_2.format;
-  hal_stream->usage = (uint64_t)hidl_stream.v3_2.usage;
-  hal_stream->data_space = (android_dataspace_t)hidl_stream.v3_2.dataSpace;
+  hal_stream->width = aidl_stream.width;
+  hal_stream->height = aidl_stream.height;
+  hal_stream->format = (android_pixel_format_t)aidl_stream.format;
+  hal_stream->usage = (uint64_t)aidl_stream.usage;
+  hal_stream->data_space = (android_dataspace_t)aidl_stream.dataSpace;
 
-  res = ConvertToHalStreamRotation(hidl_stream.v3_2.rotation,
-                                   &hal_stream->rotation);
+  res = ConvertToHalStreamRotation(aidl_stream.rotation, &hal_stream->rotation);
   if (res != OK) {
     ALOGE("%s: Converting to HAL stream rotation failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
     return res;
   }
 
-  if (hidl_stream.physicalCameraId.empty()) {
+  if (aidl_stream.physicalCameraId.empty()) {
     hal_stream->is_physical_camera_stream = false;
   } else {
     hal_stream->is_physical_camera_stream = true;
-    hal_stream->physical_camera_id = std::stoul(hidl_stream.physicalCameraId);
+    hal_stream->physical_camera_id = std::stoul(aidl_stream.physicalCameraId);
   }
 
-  hal_stream->buffer_size = hidl_stream.bufferSize;
+  hal_stream->buffer_size = aidl_stream.bufferSize;
+  hal_stream->group_id = aidl_stream.groupId;
 
-  return OK;
-}
+  hal_stream->used_in_max_resolution_mode = sensorPixelModeContains(
+      aidl_stream, ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION);
+  hal_stream->used_in_default_resolution_mode =
+      aidl_stream.sensorPixelModesUsed.size() > 0
+          ? sensorPixelModeContains(aidl_stream,
+                                    ANDROID_SENSOR_PIXEL_MODE_DEFAULT)
+          : true;
+  hal_stream->dynamic_profile = static_cast<
+      camera_metadata_enum_android_request_available_dynamic_range_profiles_map>(
+      aidl_stream.dynamicRangeProfile);
 
-status_t ConvertToHalTorchMode(TorchMode hidl_torch_mode,
-                               google_camera_hal::TorchMode* hal_torch_mode) {
-  if (hal_torch_mode == nullptr) {
-    ALOGE("%s: hal_torch_mode is nullptr.", __FUNCTION__);
-    return BAD_VALUE;
-  }
-
-  switch (hidl_torch_mode) {
-    case TorchMode::ON:
-      *hal_torch_mode = google_camera_hal::TorchMode::kOn;
-      break;
-    case TorchMode::OFF:
-      *hal_torch_mode = google_camera_hal::TorchMode::kOff;
-      break;
-    default:
-      ALOGE("%s: Unknown torch mode: %u", __FUNCTION__, hidl_torch_mode);
-      return BAD_VALUE;
-  }
+  hal_stream->use_case =
+      static_cast<camera_metadata_enum_android_scaler_available_stream_use_cases>(
+          aidl_stream.useCase);
 
   return OK;
 }
 
 status_t ConvertToHalBufferRequestStatus(
-    const BufferRequestStatus& hidl_buffer_request_status,
+    const BufferRequestStatus& aidl_buffer_request_status,
     google_camera_hal::BufferRequestStatus* hal_buffer_request_status) {
   if (hal_buffer_request_status == nullptr) {
     ALOGE("%s: hal_buffer_request_status is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_buffer_request_status) {
+  switch (aidl_buffer_request_status) {
     case BufferRequestStatus::OK:
       *hal_buffer_request_status = google_camera_hal::BufferRequestStatus::kOk;
       break;
@@ -1066,7 +1055,7 @@ status_t ConvertToHalBufferRequestStatus(
       break;
     default:
       ALOGE("%s: Failed unknown buffer request error code %d", __FUNCTION__,
-            hidl_buffer_request_status);
+            aidl_buffer_request_status);
       return BAD_VALUE;
   }
 
@@ -1074,16 +1063,16 @@ status_t ConvertToHalBufferRequestStatus(
 }
 
 status_t ConvertToHalBufferReturnStatus(
-    const StreamBufferRet& hidl_stream_buffer_return,
+    const StreamBufferRet& aidl_stream_buffer_return,
     google_camera_hal::BufferReturn* hal_buffer_return) {
+  using Tag = aidl::android::hardware::camera::device::StreamBuffersVal::Tag;
   if (hal_buffer_return == nullptr) {
     ALOGE("%s: hal_buffer_return is nullptr.", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  if (hidl_stream_buffer_return.val.getDiscriminator() ==
-      StreamBuffersVal::hidl_discriminator::error) {
-    switch (hidl_stream_buffer_return.val.error()) {
+  if (aidl_stream_buffer_return.val.getTag() == Tag::error) {
+    switch (aidl_stream_buffer_return.val.get<Tag::error>()) {
       case StreamBufferRequestError::NO_BUFFER_AVAILABLE:
         hal_buffer_return->val.error =
             google_camera_hal::StreamBufferRequestError::kNoBufferAvailable;
@@ -1102,7 +1091,7 @@ status_t ConvertToHalBufferReturnStatus(
         break;
       default:
         ALOGE("%s: Unknown StreamBufferRequestError %d", __FUNCTION__,
-              hidl_stream_buffer_return.val.error());
+              aidl_stream_buffer_return.val.get<Tag::error>());
         return BAD_VALUE;
     }
   } else {
@@ -1113,40 +1102,20 @@ status_t ConvertToHalBufferReturnStatus(
   return OK;
 }
 
-status_t ConvertStreamConfigurationV34ToV37(
-    const device::V3_4::StreamConfiguration& config_3_4,
-    StreamConfiguration* config_3_7) {
-  if (config_3_7 == nullptr) {
-    ALOGE("%s: config_3_7 is nullptr.", __FUNCTION__);
-    return BAD_VALUE;
-  }
-
-  config_3_7->streams.resize(config_3_4.streams.size());
-  for (size_t i = 0; i < config_3_4.streams.size(); i++) {
-    config_3_7->streams[i].v3_4 = config_3_4.streams[i];
-    config_3_7->streams[i].groupId = -1;
-  }
-  config_3_7->operationMode = config_3_4.operationMode;
-  config_3_7->sessionParams = config_3_4.sessionParams;
-  config_3_7->multiResolutionInputImage = false;
-
-  return OK;
-}
-
 status_t ConvertToHalDeviceState(
-    const hardware::hidl_bitfield<DeviceState> hidl_device_state,
+    int64_t aidl_device_state,
     google_camera_hal::DeviceState& hal_device_state) {
-  switch (static_cast<DeviceState>(hidl_device_state)) {
-    case DeviceState::NORMAL:
+  switch (aidl_device_state) {
+    case ICameraProvider::DEVICE_STATE_NORMAL:
       hal_device_state = google_camera_hal::DeviceState::kNormal;
       break;
-    case DeviceState::BACK_COVERED:
+    case ICameraProvider::DEVICE_STATE_BACK_COVERED:
       hal_device_state = google_camera_hal::DeviceState::kBackCovered;
       break;
-    case DeviceState::FRONT_COVERED:
+    case ICameraProvider::DEVICE_STATE_FRONT_COVERED:
       hal_device_state = google_camera_hal::DeviceState::kFrontCovered;
       break;
-    case DeviceState::FOLDED:
+    case ICameraProvider::DEVICE_STATE_FOLDED:
       hal_device_state = google_camera_hal::DeviceState::kFolded;
       break;
     default:
@@ -1156,7 +1125,8 @@ status_t ConvertToHalDeviceState(
 
   return OK;
 }
-}  // namespace hidl_utils
+
+}  // namespace aidl_utils
 }  // namespace implementation
 }  // namespace camera
 }  // namespace hardware

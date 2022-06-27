@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,122 +14,104 @@
  * limitations under the License.
  */
 
-#ifndef HARDWARE_GOOGLE_CAMERA_HAL_HIDL_SERVICE_HIDL_CAMERA_DEVICE_SESSION_H_
-#define HARDWARE_GOOGLE_CAMERA_HAL_HIDL_SERVICE_HIDL_CAMERA_DEVICE_SESSION_H_
+#ifndef HARDWARE_GOOGLE_CAMERA_HAL_AIDL_SERVICE_AIDL_CAMERA_DEVICE_SESSION_H_
+#define HARDWARE_GOOGLE_CAMERA_HAL_AIDL_SERVICE_AIDL_CAMERA_DEVICE_SESSION_H_
 
-#include <android/hardware/camera/device/3.5/ICameraDeviceCallback.h>
-#include <android/hardware/camera/device/3.7/ICameraDevice.h>
-#include <android/hardware/camera/device/3.7/ICameraDeviceSession.h>
+#include <aidl/android/hardware/camera/device/BnCameraDeviceSession.h>
+#include <aidl/android/hardware/camera/device/ICameraDevice.h>
+#include <aidl/android/hardware/camera/device/ICameraDeviceCallback.h>
 #include <android/hardware/thermal/2.0/IThermal.h>
-#include <fmq/MessageQueue.h>
+#include <fmq/AidlMessageQueue.h>
 
 #include <shared_mutex>
 
+#include "aidl_profiler.h"
 #include "camera_device_session.h"
-#include "hidl_profiler.h"
 #include "hidl_thermal_utils.h"
 
 namespace android {
 namespace hardware {
 namespace camera {
 namespace device {
-namespace V3_7 {
 namespace implementation {
 
-using ::android::hardware::camera::common::V1_0::Status;
-using ::android::hardware::camera::device::V3_2::BufferCache;
-using ::android::hardware::camera::device::V3_2::RequestTemplate;
-using ::android::hardware::camera::device::V3_5::ICameraDeviceCallback;
-using ::android::hardware::camera::device::V3_7::CaptureRequest;
-using ::android::hardware::camera::device::V3_7::ICameraDeviceSession;
-using ::android::hardware::camera::device::V3_7::StreamConfiguration;
-using ::android::hardware::camera::implementation::HidlProfiler;
+using ::aidl::android::hardware::camera::device::BnCameraDeviceSession;
+using ::aidl::android::hardware::camera::device::BufferCache;
+using ::aidl::android::hardware::camera::device::CameraMetadata;
+using ::aidl::android::hardware::camera::device::CameraOfflineSessionInfo;
+using ::aidl::android::hardware::camera::device::CaptureRequest;
+using ::aidl::android::hardware::camera::device::HalStream;
+using ::aidl::android::hardware::camera::device::ICameraDeviceCallback;
+using ::aidl::android::hardware::camera::device::ICameraOfflineSession;
+using ::aidl::android::hardware::camera::device::RequestTemplate;
+using ::aidl::android::hardware::camera::device::StreamConfiguration;
+using ::aidl::android::hardware::common::fmq::SynchronizedReadWrite;
+using ::android::hardware::camera::implementation::AidlProfiler;
+using ndk::ScopedAStatus;
 
-using MetadataQueue =
-    ::android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite>;
+using MetadataQueue = AidlMessageQueue<int8_t, SynchronizedReadWrite>;
 
-// HidlCameraDeviceSession implements the HIDL camera device session interface,
+// AidlCameraDeviceSession implements the AIDL camera device session interface,
 // ICameraDeviceSession, that contains the methods to configure and request
 // captures from an active camera device.
-class HidlCameraDeviceSession : public ICameraDeviceSession {
+class AidlCameraDeviceSession : public BnCameraDeviceSession {
  public:
-  // Create a HidlCameraDeviceSession.
+  // Create a AidlCameraDeviceSession.
   // device_session is a google camera device session that
-  // HidlCameraDeviceSession is going to manage. Creating a
-  // HidlCameraDeviceSession will fail if device_session is
+  // AidlCameraDeviceSession is going to manage. Creating a
+  // AidlCameraDeviceSession will fail if device_session is
   // nullptr.
-  static std::unique_ptr<HidlCameraDeviceSession> Create(
-      const sp<V3_2::ICameraDeviceCallback>& callback,
+  static std::shared_ptr<AidlCameraDeviceSession> Create(
+      const std::shared_ptr<ICameraDeviceCallback>& callback,
       std::unique_ptr<google_camera_hal::CameraDeviceSession> device_session,
-      std::shared_ptr<HidlProfiler> hidl_profiler);
+      std::shared_ptr<AidlProfiler> aidl_profiler);
 
-  virtual ~HidlCameraDeviceSession();
+  virtual ~AidlCameraDeviceSession();
 
-  // Override functions in ICameraDeviceSession
-  Return<void> configureStreams_3_7(
-      const StreamConfiguration& requestedConfiguration,
-      configureStreams_3_7_cb _hidl_cb) override;
+  // functions in ICameraDeviceSession
 
-  Return<void> processCaptureRequest_3_7(
-      const hidl_vec<CaptureRequest>& requests,
-      const hidl_vec<BufferCache>& cachesToRemove,
-      processCaptureRequest_3_7_cb _hidl_cb) override;
+  ScopedAStatus close() override;
 
-  Return<void> configureStreams_3_6(
-      const V3_5::StreamConfiguration& requestedConfiguration,
-      ICameraDeviceSession::configureStreams_3_6_cb _hidl_cb) override;
+  ScopedAStatus configureStreams(const StreamConfiguration&,
+                                 std::vector<HalStream>*) override;
 
-  Return<void> switchToOffline(const hidl_vec<int32_t>& streamsToKeep,
-                               switchToOffline_cb _hidl_cb) override;
+  ScopedAStatus constructDefaultRequestSettings(
+      RequestTemplate in_type, CameraMetadata* _aidl_return) override;
 
-  Return<void> constructDefaultRequestSettings(
-      RequestTemplate type,
-      ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb) override;
+  ScopedAStatus flush() override;
 
-  Return<void> configureStreams_3_5(
-      const V3_5::StreamConfiguration& requestedConfiguration,
-      ICameraDeviceSession::configureStreams_3_5_cb _hidl_cb) override;
+  ScopedAStatus getCaptureRequestMetadataQueue(
+      ::aidl::android::hardware::common::fmq::MQDescriptor<
+          int8_t, SynchronizedReadWrite>* _aidl_return) override;
 
-  Return<void> getCaptureRequestMetadataQueue(
-      ICameraDeviceSession::getCaptureRequestMetadataQueue_cb _hidl_cb) override;
+  ScopedAStatus getCaptureResultMetadataQueue(
+      ::aidl::android::hardware::common::fmq::MQDescriptor<
+          int8_t, SynchronizedReadWrite>* _aidl_return) override;
 
-  Return<void> getCaptureResultMetadataQueue(
-      ICameraDeviceSession::getCaptureResultMetadataQueue_cb _hidl_cb) override;
+  ScopedAStatus isReconfigurationRequired(
+      const CameraMetadata& in_oldSessionParams,
+      const CameraMetadata& in_newSessionParams, bool* _aidl_return) override;
 
-  Return<void> processCaptureRequest_3_4(
-      const hidl_vec<V3_4::CaptureRequest>& requests,
-      const hidl_vec<BufferCache>& cachesToRemove,
-      processCaptureRequest_3_4_cb _hidl_cb) override;
+  ScopedAStatus processCaptureRequest(
+      const std::vector<CaptureRequest>& in_requests,
+      const std::vector<BufferCache>& in_cachesToRemove,
+      int32_t* _aidl_return) override;
 
-  Return<void> signalStreamFlush(const hidl_vec<int32_t>& streamIds,
-                                 uint32_t streamConfigCounter) override;
+  ScopedAStatus signalStreamFlush(const std::vector<int32_t>& in_streamIds,
+                                  int32_t in_streamConfigCounter) override;
 
-  Return<void> isReconfigurationRequired(const V3_2::CameraMetadata& oldSessionParams,
-      const V3_2::CameraMetadata& newSessionParams,
-      ICameraDeviceSession::isReconfigurationRequired_cb _hidl_cb) override;
+  ScopedAStatus switchToOffline(
+      const std::vector<int32_t>& in_streamsToKeep,
+      CameraOfflineSessionInfo* out_offlineSessionInfo,
+      std::shared_ptr<ICameraOfflineSession>* _aidl_return) override;
 
-  Return<Status> flush() override;
+  ScopedAStatus repeatingRequestEnd(
+      int32_t /*in_frameNumber*/,
+      const std::vector<int32_t>& /*in_streamIds*/) override {
+    return ScopedAStatus::ok();
+  };
 
-  Return<void> close() override;
-
-  // Legacy methods
-  Return<void> configureStreams(const V3_2::StreamConfiguration&,
-                                configureStreams_cb _hidl_cb) override;
-
-  Return<void> configureStreams_3_3(const V3_2::StreamConfiguration&,
-                                    configureStreams_3_3_cb _hidl_cb) override;
-
-  Return<void> configureStreams_3_4(const V3_4::StreamConfiguration&,
-                                    configureStreams_3_4_cb _hidl_cb) override;
-
-  Return<void> processCaptureRequest(
-      const hidl_vec<V3_2::CaptureRequest>& requests,
-      const hidl_vec<BufferCache>& cachesToRemove,
-      processCaptureRequest_cb _hidl_cb) override;
-  // End of override functions in ICameraDeviceSession
-
- protected:
-  HidlCameraDeviceSession() = default;
+  AidlCameraDeviceSession() = default;
 
  private:
   static constexpr uint32_t kRequestMetadataQueueSizeBytes = 1 << 20;  // 1MB
@@ -138,11 +120,11 @@ class HidlCameraDeviceSession : public ICameraDeviceSession {
   // Initialize the latest available gralloc buffer mapper.
   status_t InitializeBufferMapper();
 
-  // Initialize HidlCameraDeviceSession with a CameraDeviceSession.
+  // Initialize AidlCameraDeviceSession with a CameraDeviceSession.
   status_t Initialize(
-      const sp<V3_2::ICameraDeviceCallback>& callback,
+      const std::shared_ptr<ICameraDeviceCallback>& callback,
       std::unique_ptr<google_camera_hal::CameraDeviceSession> device_session,
-      std::shared_ptr<HidlProfiler> hidl_profiler);
+      std::shared_ptr<AidlProfiler> aidl_profiler);
 
   // Create a metadata queue.
   // If override_size_property contains a valid size, it will create a metadata
@@ -159,7 +141,7 @@ class HidlCameraDeviceSession : public ICameraDeviceSession {
   void ProcessCaptureResult(
       std::unique_ptr<google_camera_hal::CaptureResult> hal_result);
 
-  // Invoked when reciving a message from HAL.
+  // Invoked when receiving a message from HAL.
   void NotifyHalMessage(const google_camera_hal::NotifyMessage& hal_message);
 
   // Invoked when requesting stream buffers from HAL.
@@ -201,9 +183,9 @@ class HidlCameraDeviceSession : public ICameraDeviceSession {
 
   // Assuming callbacks to framework is thread-safe, the shared mutex is only
   // used to protect member variable writing and reading.
-  std::shared_mutex hidl_device_callback_lock_;
-  // Protected by hidl_device_callback_lock_
-  sp<ICameraDeviceCallback> hidl_device_callback_;
+  std::shared_mutex aidl_device_callback_lock_;
+  // Protected by aidl_device_callback_lock_
+  std::shared_ptr<ICameraDeviceCallback> aidl_device_callback_;
 
   sp<android::hardware::graphics::mapper::V2_0::IMapper> buffer_mapper_v2_;
   sp<android::hardware::graphics::mapper::V3_0::IMapper> buffer_mapper_v3_;
@@ -227,14 +209,13 @@ class HidlCameraDeviceSession : public ICameraDeviceSession {
   // Must be protected by pending_first_frame_buffers_mutex_
   size_t num_pending_first_frame_buffers_ = 0;
 
-  std::shared_ptr<HidlProfiler> hidl_profiler_;
+  std::shared_ptr<AidlProfiler> aidl_profiler_;
 };
 
 }  // namespace implementation
-}  // namespace V3_7
 }  // namespace device
 }  // namespace camera
 }  // namespace hardware
 }  // namespace android
 
-#endif  // HARDWARE_GOOGLE_CAMERA_HAL_HIDL_SERVICE_HIDL_CAMERA_DEVICE_SESSION_H_
+#endif  // HARDWARE_GOOGLE_CAMERA_HAL_AIDL_SERVICE_AIDL_CAMERA_DEVICE_SESSION_H_
