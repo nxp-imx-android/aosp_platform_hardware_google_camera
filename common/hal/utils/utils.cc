@@ -520,6 +520,10 @@ status_t GetStreamUseCases(const HalCameraMetadata* static_metadata,
   return OK;
 }
 
+bool IsSecuredStream(const Stream& stream) {
+  return (stream.usage & GRALLOC_USAGE_PROTECTED) != 0u;
+}
+
 }  // namespace utils
 }  // namespace google_camera_hal
 }  // namespace android
