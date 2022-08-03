@@ -219,7 +219,11 @@ bool ZslSnapshotCaptureSession::IsStreamConfigurationSupported(
   bool has_preview_stream = false;
   for (const auto& stream : stream_config.streams) {
     if (stream.is_physical_camera_stream) {
-      ALOGE("%s: support logical camera only", __FUNCTION__);
+      ALOGE("%s: support logical stream only", __FUNCTION__);
+      return false;
+    }
+    if (utils::IsSecuredStream(stream)) {
+      ALOGE("%s: don't support secured stream", __FUNCTION__);
       return false;
     }
     if (utils::IsJPEGSnapshotStream(stream) ||
