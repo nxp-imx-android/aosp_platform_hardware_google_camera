@@ -105,6 +105,13 @@ enum class StreamRotation : uint32_t {
   kRotation270,
 };
 
+typedef camera_metadata_enum_android_request_available_dynamic_range_profiles_map
+    DynamicRangeProfile;
+typedef camera_metadata_enum_android_request_available_color_space_profiles_map
+    ColorSpaceProfile;
+typedef camera_metadata_enum_android_scaler_available_stream_use_cases
+    StreamUseCase;
+
 // See the definition of
 // ::android::hardware::camera::device::V3_8::Stream;
 struct Stream {
@@ -122,11 +129,11 @@ struct Stream {
   int32_t group_id = -1;
   bool used_in_max_resolution_mode = false;
   bool used_in_default_resolution_mode = true;
-  camera_metadata_enum_android_request_available_dynamic_range_profiles_map
-      dynamic_profile =
-          ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD;
-  camera_metadata_enum_android_scaler_available_stream_use_cases use_case =
-      ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
+  DynamicRangeProfile dynamic_profile =
+      ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD;
+  StreamUseCase use_case = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
+  ColorSpaceProfile color_space =
+      ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED;
 };
 
 // See the definition of

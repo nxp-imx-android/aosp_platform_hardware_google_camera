@@ -51,6 +51,26 @@ using google_camera_hal::NotifyMessage;
 
 using android::hardware::graphics::common::V1_2::Dataspace;
 
+// Copied from ColorSpace.java (see Named)
+enum ColorSpaceNamed {
+  SRGB,
+  LINEAR_SRGB,
+  EXTENDED_SRGB,
+  LINEAR_EXTENDED_SRGB,
+  BT709,
+  BT2020,
+  DCI_P3,
+  DISPLAY_P3,
+  NTSC_1953,
+  SMPTE_C,
+  ADOBE_RGB,
+  PRO_PHOTO_RGB,
+  ACES,
+  ACESCG,
+  CIE_XYZ,
+  CIE_LAB
+};
+
 const uint32_t EmulatedSensor::kRegularSceneHandshake = 1; // Scene handshake divider
 const uint32_t EmulatedSensor::kReducedSceneHandshake = 2; // Scene handshake divider
 
@@ -123,6 +143,38 @@ const float EmulatedSensor::kDefaultToneMapCurveRed[4] = {.0f, .0f, 1.f, 1.f};
 const float EmulatedSensor::kDefaultToneMapCurveGreen[4] = {.0f, .0f, 1.f, 1.f};
 const float EmulatedSensor::kDefaultToneMapCurveBlue[4] = {.0f, .0f, 1.f, 1.f};
 
+// All XY matrix coefficients sourced from
+// https://developer.android.com/reference/kotlin/android/graphics/ColorSpace.Named
+// and XYZ coefficients calculated using the method found in
+// ColorSpace.Rgb.computeXyzMatrix
+struct XyzMatrix {
+  float xR = 3.2406f;
+  float yR = -1.5372f;
+  float zR = -0.4986f;
+  float xG = -0.9689f;
+  float yG = 1.8758f;
+  float zG = 0.0415f;
+  float xB = 0.0557f;
+  float yB = -0.2040f;
+  float zB = 1.0570f;
+};
+
+static const XyzMatrix kSrgbXyzMatrix = {3.2406f,  -1.5372f, -0.4986f,
+                                         -0.9689f, 1.8758f,  0.0415f,
+                                         0.0557f,  -0.2040f, 1.0570f};
+
+static const XyzMatrix kDisplayP3Matrix = {2.4931f,  -0.9316f, -0.4023f,
+                                           -0.8291f, 1.7627f,  0.0234f,
+                                           0.0361f,  -0.0761f, 0.9570f};
+
+static const XyzMatrix kBt709Matrix = {3.2410f,  -1.5374f, -0.4986f,
+                                       -0.9692f, 1.8760f,  0.0416f,
+                                       0.0556f,  -0.2040f, 1.0570f};
+
+static const XyzMatrix kBt2020Matrix = {1.7167f,  -0.3557f, 0.0176f,
+                                        -0.6667f, 1.6165f,  -0.0427f,
+                                        0.0176f,  0.0158f,  0.9421f};
+
 /** A few utility functions for math, normal distributions */
 
 // Take advantage of IEEE floating-point format to calculate an approximate
@@ -141,9 +193,13 @@ float sqrtf_approx(float r) {
 }
 
 EmulatedSensor::EmulatedSensor() : Thread(false), got_vsync_(false) {
-  gamma_table_.resize(kSaturationPoint + 1);
+  gamma_table_sRGB_.resize(kSaturationPoint + 1);
+  gamma_table_smpte170m_.resize(kSaturationPoint + 1);
+  gamma_table_hlg_.resize(kSaturationPoint + 1);
   for (int32_t i = 0; i <= kSaturationPoint; i++) {
-    gamma_table_[i] = ApplysRGBGamma(i, kSaturationPoint);
+    gamma_table_sRGB_[i] = ApplysRGBGamma(i, kSaturationPoint);
+    gamma_table_smpte170m_[i] = ApplySMPTE170MGamma(i, kSaturationPoint);
+    gamma_table_hlg_[i] = ApplyHLGGamma(i, kSaturationPoint);
   }
 }
 
@@ -844,6 +900,11 @@ bool EmulatedSensor::threadLoop() {
               ? false
               : reprocess_request;
 
+      if ((*b)->color_space !=
+          ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {
+        CalculateRgbRgbMatrix((*b)->color_space, device_chars->second);
+      }
+
       switch ((*b)->format) {
         case PixelFormat::RAW16:
           if (!reprocess_request) {
@@ -917,7 +978,8 @@ bool EmulatedSensor::threadLoop() {
           if (!reprocess_request) {
             CaptureRGB((*b)->plane.img.img, (*b)->width, (*b)->height,
                        (*b)->plane.img.stride_in_bytes, RGBLayout::RGB,
-                       device_settings->second.gain, device_chars->second);
+                       device_settings->second.gain, (*b)->color_space,
+                       device_chars->second);
           } else {
             ALOGE("%s: Reprocess requests with output format %x no supported!",
                   __FUNCTION__, (*b)->format);
@@ -928,7 +990,8 @@ bool EmulatedSensor::threadLoop() {
           if (!reprocess_request) {
             CaptureRGB((*b)->plane.img.img, (*b)->width, (*b)->height,
                        (*b)->plane.img.stride_in_bytes, RGBLayout::RGBA,
-                       device_settings->second.gain, device_chars->second);
+                       device_settings->second.gain, (*b)->color_space,
+                       device_chars->second);
           } else {
             ALOGE("%s: Reprocess requests with output format %x no supported!",
                   __FUNCTION__, (*b)->format);
@@ -950,6 +1013,7 @@ bool EmulatedSensor::threadLoop() {
             auto jpeg_input = std::make_unique<JpegYUV420Input>();
             jpeg_input->width = (*b)->width;
             jpeg_input->height = (*b)->height;
+            jpeg_input->color_space = (*b)->color_space;
             auto img =
                 new uint8_t[(jpeg_input->width * jpeg_input->height * 3) / 2];
             jpeg_input->yuv_planes = {
@@ -972,10 +1036,10 @@ bool EmulatedSensor::threadLoop() {
                                       ANDROID_EDGE_MODE_HIGH_QUALITY)
                                          ? HIGH_QUALITY
                                          : REGULAR;
-            auto ret = ProcessYUV420(
-                yuv_input, yuv_output, device_settings->second.gain,
-                process_type, device_settings->second.zoom_ratio,
-                rotate, device_chars->second);
+            auto ret = ProcessYUV420(yuv_input, yuv_output,
+                                     device_settings->second.gain, process_type,
+                                     device_settings->second.zoom_ratio, rotate,
+                                     (*b)->color_space, device_chars->second);
             if (ret != 0) {
               (*b)->stream_buffer.status = BufferStatus::kError;
               break;
@@ -1021,10 +1085,10 @@ bool EmulatedSensor::threadLoop() {
                                             ANDROID_EDGE_MODE_HIGH_QUALITY)
                                                ? HIGH_QUALITY
                                                : REGULAR;
-          auto ret = ProcessYUV420(
-              yuv_input, yuv_output, device_settings->second.gain,
-              process_type, device_settings->second.zoom_ratio,
-              rotate, device_chars->second);
+          auto ret =
+              ProcessYUV420(yuv_input, yuv_output, device_settings->second.gain,
+                            process_type, device_settings->second.zoom_ratio,
+                            rotate, (*b)->color_space, device_chars->second);
           if (ret != 0) {
             (*b)->stream_buffer.status = BufferStatus::kError;
           }
@@ -1054,7 +1118,7 @@ bool EmulatedSensor::threadLoop() {
               CaptureYUV420((*b)->plane.img_y_crcb, (*b)->width, (*b)->height,
                             device_settings->second.gain,
                             device_settings->second.zoom_ratio, rotate,
-                            device_chars->second);
+                            (*b)->color_space, device_chars->second);
             } else {
               ALOGE(
                   "%s: Reprocess requests with output format %x no supported!",
@@ -1432,7 +1496,8 @@ void EmulatedSensor::CaptureRawFullRes(uint8_t* img, size_t row_stride_in_bytes,
 }
 
 void EmulatedSensor::CaptureRGB(uint8_t* img, uint32_t width, uint32_t height,
-                                uint32_t stride, RGBLayout layout, uint32_t gain,
+                                uint32_t stride, RGBLayout layout,
+                                uint32_t gain, int32_t color_space,
                                 const SensorCharacteristics& chars) {
   ATRACE_CALL();
   float total_gain = gain / 100.0 * GetBaseGainFactor(chars.max_raw_value);
@@ -1452,6 +1517,11 @@ void EmulatedSensor::CaptureRGB(uint8_t* img, uint32_t width, uint32_t height,
       r_count = pixel[EmulatedScene::R] * scale64x;
       g_count = pixel[EmulatedScene::Gr] * scale64x;
       b_count = pixel[EmulatedScene::B] * scale64x;
+
+      if (color_space !=
+          ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {
+        RgbToRgb(&r_count, &g_count, &b_count);
+      }
 
       uint8_t r = r_count < 255 * 64 ? r_count / 64 : 255;
       uint8_t g = g_count < 255 * 64 ? g_count / 64 : 255;
@@ -1487,6 +1557,7 @@ void EmulatedSensor::CaptureRGB(uint8_t* img, uint32_t width, uint32_t height,
 void EmulatedSensor::CaptureYUV420(YCbCrPlanes yuv_layout, uint32_t width,
                                    uint32_t height, uint32_t gain,
                                    float zoom_ratio, bool rotate,
+                                   int32_t color_space,
                                    const SensorCharacteristics& chars) {
   ATRACE_CALL();
   float total_gain = gain / 100.0 * GetBaseGainFactor(chars.max_raw_value);
@@ -1538,21 +1609,27 @@ void EmulatedSensor::CaptureYUV420(YCbCrPlanes yuv_layout, uint32_t width,
       y = std::min(std::max(y, 0), (int)chars.full_res_height - 1);
       scene_->SetReadoutPixel(x, y);
 
-      int32_t r_count, g_count, b_count;
+      uint32_t r_count, g_count, b_count;
       // TODO: Perfect demosaicing is a cheat
       const uint32_t* pixel = rotate ? scene_->GetPixelElectronsColumn()
                                      : scene_->GetPixelElectrons();
       r_count = pixel[EmulatedScene::R] * scale64x;
-      r_count = r_count < kSaturationPoint ? r_count : kSaturationPoint;
       g_count = pixel[EmulatedScene::Gr] * scale64x;
-      g_count = g_count < kSaturationPoint ? g_count : kSaturationPoint;
       b_count = pixel[EmulatedScene::B] * scale64x;
+
+      if (color_space !=
+          ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {
+        RgbToRgb(&r_count, &g_count, &b_count);
+      }
+
+      r_count = r_count < kSaturationPoint ? r_count : kSaturationPoint;
+      g_count = g_count < kSaturationPoint ? g_count : kSaturationPoint;
       b_count = b_count < kSaturationPoint ? b_count : kSaturationPoint;
 
       // Gamma correction
-      r_count = gamma_table_[r_count];
-      g_count = gamma_table_[g_count];
-      b_count = gamma_table_[b_count];
+      r_count = GammaTable(r_count, color_space);
+      g_count = GammaTable(g_count, color_space);
+      b_count = GammaTable(b_count, color_space);
 
       uint8_t y8 = (rgb_to_y[0] * r_count + rgb_to_y[1] * g_count +
                     rgb_to_y[2] * b_count) /
@@ -1626,8 +1703,9 @@ void EmulatedSensor::CaptureDepth(uint8_t* img, uint32_t gain, uint32_t width,
 
 status_t EmulatedSensor::ProcessYUV420(const YUV420Frame& input,
                                        const YUV420Frame& output, uint32_t gain,
-                                       ProcessType process_type, float zoom_ratio,
-                                       bool rotate_and_crop,
+                                       ProcessType process_type,
+                                       float zoom_ratio, bool rotate_and_crop,
+                                       int32_t color_space,
                                        const SensorCharacteristics& chars) {
   ATRACE_CALL();
   size_t input_width, input_height;
@@ -1643,8 +1721,8 @@ status_t EmulatedSensor::ProcessYUV420(const YUV420Frame& input,
 
   switch (process_type) {
     case HIGH_QUALITY:
-      CaptureYUV420(output.planes, output.width, output.height, gain, zoom_ratio,
-                    rotate_and_crop, chars);
+      CaptureYUV420(output.planes, output.width, output.height, gain,
+                    zoom_ratio, rotate_and_crop, color_space, chars);
       return OK;
     case REPROCESS:
       input_width = input.width;
@@ -1690,7 +1768,7 @@ status_t EmulatedSensor::ProcessYUV420(const YUV420Frame& input,
           .cbcr_stride = static_cast<uint32_t>(input_width) / 2,
           .cbcr_step = 1};
       CaptureYUV420(input_planes, input_width, input_height, gain, zoom_ratio,
-                    rotate_and_crop, chars);
+                    rotate_and_crop, color_space, chars);
   }
 
   output_planes = output.planes;
@@ -1741,6 +1819,111 @@ int32_t EmulatedSensor::ApplysRGBGamma(int32_t value, int32_t saturation) {
                 ? n_value * 12.92f
                 : 1.055f * pow(n_value, 0.4166667f) - 0.055f;
   return n_value * saturation;
+}
+
+int32_t EmulatedSensor::ApplySMPTE170MGamma(int32_t value, int32_t saturation) {
+  float n_value = (static_cast<float>(value) / saturation);
+  n_value = (n_value <= 0.018f) ? n_value * 4.5f
+                                : 1.099f * pow(n_value, 0.45f) - 0.099f;
+  return n_value * saturation;
+}
+
+int32_t EmulatedSensor::ApplyST2084Gamma(int32_t value, int32_t saturation) {
+  float n_value = (static_cast<float>(value) / saturation);
+  float c2 = 32.f * 2413.f / 4096.f;
+  float c3 = 32.f * 2392.f / 4096.f;
+  float c1 = c3 - c2 + 1.f;
+  float m = 128.f * 2523.f / 4096.f;
+  float n = 0.25f * 2610.f / 4096.f;
+  n_value = pow((c1 + c2 * pow(n_value, n)) / (1 + c3 * pow(n_value, n)), m);
+  return n_value * saturation;
+}
+
+int32_t EmulatedSensor::ApplyHLGGamma(int32_t value, int32_t saturation) {
+  float n_value = (static_cast<float>(value) / saturation);
+  // The full HLG gamma curve has additional parameters for n_value > 1, but n_value
+  // in the emulated camera is always <= 1 due to lack of HDR display features.
+  n_value = 0.5f * pow(n_value, 0.5f);
+  return n_value * saturation;
+}
+
+int32_t EmulatedSensor::GammaTable(int32_t value, int32_t color_space) {
+  switch (color_space) {
+    case ColorSpaceNamed::BT709:
+      return gamma_table_smpte170m_[value];
+    case ColorSpaceNamed::BT2020:
+      return gamma_table_hlg_[value];  // Assume HLG
+    case ColorSpaceNamed::DISPLAY_P3:
+    case ColorSpaceNamed::SRGB:
+    default:
+      return gamma_table_sRGB_[value];
+  }
+
+  return 0;
+}
+
+void EmulatedSensor::RgbToRgb(uint32_t* r_count, uint32_t* g_count,
+                              uint32_t* b_count) {
+  uint32_t r = *r_count;
+  uint32_t g = *g_count;
+  uint32_t b = *b_count;
+  *r_count = (uint32_t)std::max(
+      r * rgb_rgb_matrix_.rR + g * rgb_rgb_matrix_.gR + b * rgb_rgb_matrix_.bR,
+      0.0f);
+  *g_count = (uint32_t)std::max(
+      r * rgb_rgb_matrix_.rG + g * rgb_rgb_matrix_.gG + b * rgb_rgb_matrix_.bG,
+      0.0f);
+  *b_count = (uint32_t)std::max(
+      r * rgb_rgb_matrix_.rB + g * rgb_rgb_matrix_.gB + b * rgb_rgb_matrix_.bB,
+      0.0f);
+}
+
+void EmulatedSensor::CalculateRgbRgbMatrix(int32_t color_space,
+                                           const SensorCharacteristics& chars) {
+  const XyzMatrix* xyzMatrix;
+  switch (color_space) {
+    case ColorSpaceNamed::DISPLAY_P3:
+      xyzMatrix = &kDisplayP3Matrix;
+      break;
+    case ColorSpaceNamed::BT709:
+      xyzMatrix = &kBt709Matrix;
+      break;
+    case ColorSpaceNamed::BT2020:
+      xyzMatrix = &kBt2020Matrix;
+      break;
+    case ColorSpaceNamed::SRGB:
+    default:
+      xyzMatrix = &kSrgbXyzMatrix;
+      break;
+  }
+
+  rgb_rgb_matrix_.rR = xyzMatrix->xR * chars.forward_matrix.rX +
+                       xyzMatrix->yR * chars.forward_matrix.rY +
+                       xyzMatrix->zR * chars.forward_matrix.rZ;
+  rgb_rgb_matrix_.gR = xyzMatrix->xR * chars.forward_matrix.gX +
+                       xyzMatrix->yR * chars.forward_matrix.gY +
+                       xyzMatrix->zR * chars.forward_matrix.gZ;
+  rgb_rgb_matrix_.bR = xyzMatrix->xR * chars.forward_matrix.bX +
+                       xyzMatrix->yR * chars.forward_matrix.bY +
+                       xyzMatrix->zR * chars.forward_matrix.bZ;
+  rgb_rgb_matrix_.rG = xyzMatrix->xG * chars.forward_matrix.rX +
+                       xyzMatrix->yG * chars.forward_matrix.rY +
+                       xyzMatrix->zG * chars.forward_matrix.rZ;
+  rgb_rgb_matrix_.gG = xyzMatrix->xG * chars.forward_matrix.gX +
+                       xyzMatrix->yG * chars.forward_matrix.gY +
+                       xyzMatrix->zG * chars.forward_matrix.gZ;
+  rgb_rgb_matrix_.bG = xyzMatrix->xG * chars.forward_matrix.bX +
+                       xyzMatrix->yG * chars.forward_matrix.bY +
+                       xyzMatrix->zG * chars.forward_matrix.bZ;
+  rgb_rgb_matrix_.rB = xyzMatrix->xB * chars.forward_matrix.rX +
+                       xyzMatrix->yB * chars.forward_matrix.rY +
+                       xyzMatrix->zB * chars.forward_matrix.rZ;
+  rgb_rgb_matrix_.gB = xyzMatrix->xB * chars.forward_matrix.gX +
+                       xyzMatrix->yB * chars.forward_matrix.gY +
+                       xyzMatrix->zB * chars.forward_matrix.gZ;
+  rgb_rgb_matrix_.bB = xyzMatrix->xB * chars.forward_matrix.bX +
+                       xyzMatrix->yB * chars.forward_matrix.bY +
+                       xyzMatrix->zB * chars.forward_matrix.bZ;
 }
 
 }  // namespace android

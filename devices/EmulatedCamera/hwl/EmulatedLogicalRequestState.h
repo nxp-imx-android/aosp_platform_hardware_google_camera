@@ -33,6 +33,7 @@ struct EmulatedStream : public HalStream {
   bool is_input;
   int32_t group_id;
   int64_t use_case;
+  int32_t color_space;
 };
 
 struct EmulatedPipeline {

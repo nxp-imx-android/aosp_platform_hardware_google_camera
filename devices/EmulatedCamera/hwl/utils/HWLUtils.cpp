@@ -24,6 +24,8 @@
 
 namespace android {
 
+using google_camera_hal::ColorSpaceProfile;
+using google_camera_hal::DynamicRangeProfile;
 using google_camera_hal::utils::HasCapability;
 
 status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
@@ -75,11 +77,8 @@ status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
 
     for (size_t i = 0; i < entry.count; i += 3) {
       sensor_chars->dynamic_range_profiles.emplace(
-          static_cast<
-              camera_metadata_enum_android_request_available_dynamic_range_profiles_map>(
-              entry.data.i64[i]),
-          std::unordered_set<
-              camera_metadata_enum_android_request_available_dynamic_range_profiles_map>());
+          static_cast<DynamicRangeProfile>(entry.data.i64[i]),
+          std::unordered_set<DynamicRangeProfile>());
       const auto profile_end =
           ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_DOLBY_VISION_8B_HDR_OEM_PO
           << 1;
@@ -88,18 +87,60 @@ status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
       for (; current_profile != profile_end; current_profile <<= 1) {
         if (entry.data.i64[i + 1] & current_profile) {
           sensor_chars->dynamic_range_profiles
-              .at(static_cast<
-                  camera_metadata_enum_android_request_available_dynamic_range_profiles_map>(
-                  entry.data.i64[i]))
-              .emplace(
-                  static_cast<
-                      camera_metadata_enum_android_request_available_dynamic_range_profiles_map>(
-                      current_profile));
+              .at(static_cast<DynamicRangeProfile>(entry.data.i64[i]))
+              .emplace(static_cast<DynamicRangeProfile>(current_profile));
         }
       }
     }
 
     sensor_chars->is_10bit_dynamic_range_capable = true;
+  }
+
+  if (HasCapability(
+          metadata,
+          ANDROID_REQUEST_AVAILABLE_CAPABILITIES_COLOR_SPACE_PROFILES)) {
+    ret = metadata->Get(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP,
+                        &entry);
+    if ((ret != OK) || ((entry.count % 3) != 0)) {
+      ALOGE("%s: Invalid ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP!",
+            __FUNCTION__);
+      return BAD_VALUE;
+    }
+
+    for (size_t i = 0; i < entry.count; i += 3) {
+      ColorSpaceProfile color_space =
+          static_cast<ColorSpaceProfile>(entry.data.i64[i]);
+      int image_format = static_cast<int>(entry.data.i64[i + 1]);
+
+      if (sensor_chars->color_space_profiles.find(color_space) ==
+          sensor_chars->color_space_profiles.end()) {
+        sensor_chars->color_space_profiles.emplace(
+            color_space,
+            std::unordered_map<int, std::unordered_set<DynamicRangeProfile>>());
+      }
+
+      std::unordered_map<int, std::unordered_set<DynamicRangeProfile>>&
+          image_format_map = sensor_chars->color_space_profiles.at(color_space);
+
+      if (image_format_map.find(image_format) == image_format_map.end()) {
+        image_format_map.emplace(image_format,
+                                 std::unordered_set<DynamicRangeProfile>());
+      }
+
+      const auto profile_end =
+          ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_DOLBY_VISION_8B_HDR_OEM_PO
+          << 1;
+      uint64_t current_profile =
+          ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD;
+      for (; current_profile != profile_end; current_profile <<= 1) {
+        if (entry.data.i64[i + 2] & current_profile) {
+          image_format_map.at(image_format)
+              .emplace(static_cast<DynamicRangeProfile>(current_profile));
+        }
+      }
+    }
+
+    sensor_chars->support_color_space_profiles = true;
   }
 
   if (HasCapability(metadata,
@@ -199,6 +240,22 @@ status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
     sensor_chars->color_filter.bX = RAT_TO_FLOAT(entry.data.r[6]);
     sensor_chars->color_filter.bY = RAT_TO_FLOAT(entry.data.r[7]);
     sensor_chars->color_filter.bZ = RAT_TO_FLOAT(entry.data.r[8]);
+
+    ret = metadata->Get(ANDROID_SENSOR_FORWARD_MATRIX1, &entry);
+    if ((ret != OK) || (entry.count != (3 * 3))) {
+      ALOGE("%s: Invalid ANDROID_SENSOR_FORWARD_MATRIX1!", __FUNCTION__);
+      return BAD_VALUE;
+    }
+
+    sensor_chars->forward_matrix.rX = RAT_TO_FLOAT(entry.data.r[0]);
+    sensor_chars->forward_matrix.gX = RAT_TO_FLOAT(entry.data.r[1]);
+    sensor_chars->forward_matrix.bX = RAT_TO_FLOAT(entry.data.r[2]);
+    sensor_chars->forward_matrix.rY = RAT_TO_FLOAT(entry.data.r[3]);
+    sensor_chars->forward_matrix.gY = RAT_TO_FLOAT(entry.data.r[4]);
+    sensor_chars->forward_matrix.bY = RAT_TO_FLOAT(entry.data.r[5]);
+    sensor_chars->forward_matrix.rZ = RAT_TO_FLOAT(entry.data.r[6]);
+    sensor_chars->forward_matrix.gZ = RAT_TO_FLOAT(entry.data.r[7]);
+    sensor_chars->forward_matrix.bZ = RAT_TO_FLOAT(entry.data.r[8]);
   } else {
     sensor_chars->color_arangement = static_cast<
         camera_metadata_enum_android_sensor_info_color_filter_arrangement>(
