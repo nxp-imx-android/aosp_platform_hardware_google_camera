@@ -44,6 +44,9 @@
  "android.control.awbLockAvailable": [
   "FALSE"
  ],
+ "android.control.autoframingAvailable": [
+  "FALSE"
+ ],
  "android.control.maxRegions": [
   "0",
   "0",
@@ -170,6 +173,7 @@
   "65573",
   "65574",
   "65575",
+  "65591",
   "1638402",
   "1638401",
   "1638403",
