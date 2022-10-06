@@ -219,7 +219,11 @@ bool ZslSnapshotCaptureSession::IsStreamConfigurationSupported(
   bool has_preview_stream = false;
   for (const auto& stream : stream_config.streams) {
     if (stream.is_physical_camera_stream) {
-      ALOGE("%s: support logical camera only", __FUNCTION__);
+      ALOGE("%s: support logical stream only", __FUNCTION__);
+      return false;
+    }
+    if (utils::IsSecuredStream(stream)) {
+      ALOGE("%s: don't support secured stream", __FUNCTION__);
       return false;
     }
     if (utils::IsJPEGSnapshotStream(stream) ||
@@ -808,11 +812,16 @@ status_t ZslSnapshotCaptureSession::Initialize(
 status_t ZslSnapshotCaptureSession::ProcessRequest(const CaptureRequest& request) {
   ATRACE_CALL();
   bool is_zsl_request = false;
+  bool is_preview_intent = false;
   camera_metadata_ro_entry entry;
   if (request.settings != nullptr) {
     if (request.settings->Get(ANDROID_CONTROL_ENABLE_ZSL, &entry) == OK &&
         *entry.data.u8 == ANDROID_CONTROL_ENABLE_ZSL_TRUE) {
       is_zsl_request = true;
+    }
+    if (request.settings->Get(ANDROID_CONTROL_CAPTURE_INTENT, &entry) == OK &&
+        *entry.data.u8 == ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW) {
+      is_preview_intent = true;
     }
   }
   status_t res = result_dispatcher_->AddPendingRequest(request, is_zsl_request);
@@ -827,12 +836,18 @@ status_t ZslSnapshotCaptureSession::ProcessRequest(const CaptureRequest& request
       ALOGW(
           "%s: frame (%d) fall back to real time request for snapshot: %s (%d)",
           __FUNCTION__, request.frame_number, strerror(-res), res);
+      if (realtime_zsl_result_request_processor_ != nullptr) {
+        realtime_zsl_result_request_processor_->UpdateOutputBufferCount(
+            request.frame_number, request.output_buffers.size(),
+            is_preview_intent);
+      }
       res = realtime_request_processor_->ProcessRequest(request);
     }
   } else {
     if (realtime_zsl_result_request_processor_ != nullptr) {
       realtime_zsl_result_request_processor_->UpdateOutputBufferCount(
-          request.frame_number, request.output_buffers.size());
+          request.frame_number, request.output_buffers.size(),
+          is_preview_intent);
     }
 
     res = realtime_request_processor_->ProcessRequest(request);
