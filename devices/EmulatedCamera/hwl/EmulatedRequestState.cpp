@@ -616,6 +616,7 @@ status_t EmulatedRequestState::ProcessAE() {
 
 status_t EmulatedRequestState::InitializeSensorSettings(
     std::unique_ptr<HalCameraMetadata> request_settings,
+    uint32_t override_frame_number,
     EmulatedSensor::SensorSettings* sensor_settings /*out*/) {
   if ((sensor_settings == nullptr) || (request_settings.get() == nullptr)) {
     return BAD_VALUE;
@@ -685,6 +686,17 @@ status_t EmulatedRequestState::InitializeSensorSettings(
   ret = request_settings_->Get(ANDROID_CONTROL_ZOOM_RATIO, &entry);
   if ((ret == OK) && (entry.count == 1)) {
     zoom_ratio_ = std::min(std::max(entry.data.f[0], min_zoom), max_zoom);
+  }
+
+  // Check settings override
+  ret = request_settings_->Get(ANDROID_CONTROL_SETTINGS_OVERRIDE, &entry);
+  if ((ret == OK) && (entry.count == 1)) {
+    settings_override_ = entry.data.i32[0];
+  }
+
+  // Store settings override frame number
+  if (override_frame_number != 0) {
+    settings_overriding_frame_number_ = override_frame_number;
   }
 
   // Check rotate_and_crop setting
@@ -870,6 +882,19 @@ std::unique_ptr<HwlPipelineResult> EmulatedRequestState::InitializeResult(
   result->result_metadata->Set(ANDROID_CONTROL_AWB_STATE, &awb_state_, 1);
   result->result_metadata->Set(ANDROID_CONTROL_AE_MODE, &ae_mode_, 1);
   result->result_metadata->Set(ANDROID_CONTROL_AE_STATE, &ae_state_, 1);
+  // If the overriding frame number isn't larger than current frame number,
+  // use 0.
+  int32_t settings_override = settings_override_;
+  uint32_t overriding_frame_number = settings_overriding_frame_number_;
+  if (overriding_frame_number <= frame_number) {
+    overriding_frame_number = frame_number;
+    settings_override = ANDROID_CONTROL_SETTINGS_OVERRIDE_OFF;
+  }
+  result->result_metadata->Set(ANDROID_CONTROL_SETTINGS_OVERRIDE,
+                               &settings_override, 1);
+  result->result_metadata->Set(ANDROID_CONTROL_SETTINGS_OVERRIDING_FRAME_NUMBER,
+                               (int32_t*)&overriding_frame_number, 1);
+
   int32_t fps_range[] = {ae_target_fps_.min_fps, ae_target_fps_.max_fps};
   result->result_metadata->Set(ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps_range,
                                ARRAY_SIZE(fps_range));
@@ -2085,6 +2110,10 @@ status_t EmulatedRequestState::InitializeControlDefaults() {
         default_requests_[idx]->Set(ANDROID_CONTROL_AF_TRIGGER, &af_trigger, 1);
       }
     }
+
+    int32_t settings_override = ANDROID_CONTROL_SETTINGS_OVERRIDE_OFF;
+    default_requests_[idx]->Set(ANDROID_CONTROL_SETTINGS_OVERRIDE,
+                                &settings_override, 1);
   }
 
   return InitializeHotPixelDefaults();

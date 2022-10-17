@@ -73,6 +73,7 @@ class EmulatedLogicalRequestState {
   status_t InitializeLogicalSettings(
       std::unique_ptr<HalCameraMetadata> request_settings,
       std::unique_ptr<std::set<uint32_t>> physical_camera_output_ids,
+      uint32_t frame_number,
       EmulatedSensor::LogicalCameraSettings* logical_settings /*out*/);
 
   static std::unique_ptr<HalCameraMetadata> AdaptLogicalCharacteristics(

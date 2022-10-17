@@ -51,6 +51,7 @@ class EmulatedRequestState {
 
   status_t InitializeSensorSettings(
       std::unique_ptr<HalCameraMetadata> request_settings,
+      uint32_t override_frame_number,
       EmulatedSensor::SensorSettings* sensor_settings /*out*/);
 
  private:
@@ -237,6 +238,8 @@ class EmulatedRequestState {
   bool af_supported_ = false;
   bool picture_caf_supported_ = false;
   bool video_caf_supported_ = false;
+  int32_t settings_override_ = ANDROID_CONTROL_SETTINGS_OVERRIDE_OFF;
+  uint32_t settings_overriding_frame_number_ = 0;
 
   // android.flash.*
   bool is_flash_supported_ = false;

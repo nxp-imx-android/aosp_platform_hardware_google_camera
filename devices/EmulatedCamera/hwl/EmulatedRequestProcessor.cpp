@@ -122,6 +122,21 @@ status_t EmulatedRequestProcessor::ProcessPipelineRequests(
         pipelines[request.pipeline_id].cb, request.input_width,
         request.input_height);
 
+    // Check if there are any settings that need to be overridden.
+    camera_metadata_ro_entry_t entry;
+    if (request.settings.get() != nullptr) {
+      auto ret = request.settings.get()->Get(ANDROID_CONTROL_SETTINGS_OVERRIDE,
+                                             &entry);
+      if ((ret == OK) && (entry.count == 1)) {
+        std::unique_ptr<HalCameraMetadata> override_setting =
+            HalCameraMetadata::Clone(request.settings.get());
+        override_settings_.push({.settings = std::move(override_setting),
+                                 .frame_number = frame_number});
+      }
+    } else {
+      override_settings_.push(
+          {.settings = nullptr, .frame_number = frame_number});
+    }
     pending_requests_.push(
         {.settings = HalCameraMetadata::Clone(request.settings.get()),
          .input_buffers = std::move(input_buffers),
@@ -457,14 +472,20 @@ void EmulatedRequestProcessor::RequestProcessorLoop() {
           // last valid values.
           // TODO: Add support for individual physical camera requests.
           if (request.settings.get() != nullptr) {
+            auto override_frame_number =
+                ApplyOverrideSettings(frame_number, request.settings);
             ret = request_state_->InitializeLogicalSettings(
                 HalCameraMetadata::Clone(request.settings.get()),
-                std::move(physical_camera_output_ids), logical_settings.get());
+                std::move(physical_camera_output_ids), override_frame_number,
+                logical_settings.get());
             last_settings_ = HalCameraMetadata::Clone(request.settings.get());
           } else {
+            auto override_frame_number =
+                ApplyOverrideSettings(frame_number, last_settings_);
             ret = request_state_->InitializeLogicalSettings(
                 HalCameraMetadata::Clone(last_settings_.get()),
-                std::move(physical_camera_output_ids), logical_settings.get());
+                std::move(physical_camera_output_ids), override_frame_number,
+                logical_settings.get());
           }
 
           if (ret == OK) {
@@ -531,6 +552,75 @@ status_t EmulatedRequestProcessor::GetDefaultRequest(
     RequestTemplate type, std::unique_ptr<HalCameraMetadata>* default_settings) {
   std::lock_guard<std::mutex> lock(process_mutex_);
   return request_state_->GetDefaultRequest(type, default_settings);
+}
+
+uint32_t EmulatedRequestProcessor::ApplyOverrideSettings(
+    uint32_t frame_number,
+    const std::unique_ptr<HalCameraMetadata>& request_settings) {
+  while (!override_settings_.empty() && request_settings.get() != nullptr) {
+    auto override_frame_number = override_settings_.front().frame_number;
+    bool repeatingOverride = (override_settings_.front().settings == nullptr);
+    const auto& override_setting = repeatingOverride
+                                       ? last_override_settings_
+                                       : override_settings_.front().settings;
+
+    camera_metadata_ro_entry_t entry;
+    status_t ret =
+        override_setting->Get(ANDROID_CONTROL_SETTINGS_OVERRIDE, &entry);
+    bool overriding = false;
+    if ((ret == OK) && (entry.count == 1) &&
+        (entry.data.i32[0] == ANDROID_CONTROL_SETTINGS_OVERRIDE_ZOOM)) {
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_CONTROL_SETTINGS_OVERRIDE);
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_CONTROL_ZOOM_RATIO);
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_SCALER_CROP_REGION);
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_CONTROL_AE_REGIONS);
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_CONTROL_AWB_REGIONS);
+      ApplyOverrideZoom(override_setting, request_settings,
+                        ANDROID_CONTROL_AF_REGIONS);
+      overriding = true;
+    }
+    if (!repeatingOverride) {
+      last_override_settings_ = HalCameraMetadata::Clone(override_setting.get());
+    }
+
+    override_settings_.pop();
+    // If there are multiple queued override settings, skip until the speed-up
+    // is at least 2 frames.
+    if (override_frame_number - frame_number >= kZoomSpeedup) {
+      // If the request's settings override isn't ON, do not return
+      // override_frame_number. Return 0 to indicate there is no
+      // override happening.
+      return overriding ? override_frame_number : 0;
+    }
+  }
+  return 0;
+}
+
+void EmulatedRequestProcessor::ApplyOverrideZoom(
+    const std::unique_ptr<HalCameraMetadata>& override_setting,
+    const std::unique_ptr<HalCameraMetadata>& request_settings,
+    camera_metadata_tag tag) {
+  status_t ret;
+  camera_metadata_ro_entry_t entry;
+  ret = override_setting->Get(tag, &entry);
+  if (ret == OK) {
+    if (entry.type == TYPE_INT32) {
+      request_settings->Set(tag, entry.data.i32, entry.count);
+    } else if (entry.type == TYPE_FLOAT) {
+      request_settings->Set(tag, entry.data.f, entry.count);
+    } else {
+      ALOGE("%s: Unsupported override key %d", __FUNCTION__, tag);
+    }
+  } else {
+    auto missing_tag = get_camera_metadata_tag_name(tag);
+    ALOGE("%s: %s needs to be specified for overriding zoom", __func__,
+          missing_tag);
+  }
 }
 
 Return<void> EmulatedRequestProcessor::SensorHandler::onEvent(const Event& e) {
