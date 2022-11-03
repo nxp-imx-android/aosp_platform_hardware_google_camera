@@ -524,6 +524,13 @@ bool IsSecuredStream(const Stream& stream) {
   return (stream.usage & GRALLOC_USAGE_PROTECTED) != 0u;
 }
 
+bool IsStreamUseCasesVideoCall(const Stream& stream) {
+  return (stream.use_case ==
+          ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL)
+             ? true
+             : false;
+}
+
 }  // namespace utils
 }  // namespace google_camera_hal
 }  // namespace android
