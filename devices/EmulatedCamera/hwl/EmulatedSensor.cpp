@@ -171,9 +171,9 @@ static const XyzMatrix kBt709Matrix = {3.2410f,  -1.5374f, -0.4986f,
                                        -0.9692f, 1.8760f,  0.0416f,
                                        0.0556f,  -0.2040f, 1.0570f};
 
-static const XyzMatrix kBt2020Matrix = {1.7167f,  -0.3557f, 0.0176f,
-                                        -0.6667f, 1.6165f,  -0.0427f,
-                                        0.0176f,  0.0158f,  0.9421f};
+static const XyzMatrix kBt2020Matrix = {1.7167f,  -0.3556f, -0.2534f,
+                                        -0.6666f, 1.6164f,  0.0158f,
+                                        0.0177f,  -0.0428f, 0.9421f};
 
 /** A few utility functions for math, normal distributions */
 
