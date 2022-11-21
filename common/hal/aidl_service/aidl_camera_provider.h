@@ -74,10 +74,6 @@ class AidlCameraProvider : public BnCameraProvider {
   // End of override functions in ICameraProvider.
   AidlCameraProvider() = default;
 
-  ScopedAStatus placeholder() override {
-    return ScopedAStatus::ok();
-  }
-
  private:
   static const std::regex kDeviceNameRegex;
 
