@@ -28,6 +28,24 @@ using google_camera_hal::ColorSpaceProfile;
 using google_camera_hal::DynamicRangeProfile;
 using google_camera_hal::utils::HasCapability;
 
+static int64_t GetLastStreamUseCase(const HalCameraMetadata* metadata) {
+  status_t ret = OK;
+  camera_metadata_ro_entry_t entry;
+  int64_t cropped_raw_use_case =
+      ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_CROPPED_RAW;
+  int64_t video_call_use_case =
+      ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL;
+  ret = metadata->Get(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES, &entry);
+  if (ret != OK) {
+    return ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
+  }
+  if (std::find(entry.data.i64, entry.data.i64 + entry.count,
+                cropped_raw_use_case) != entry.data.i64 + entry.count) {
+    return cropped_raw_use_case;
+  }
+  return video_call_use_case;
+}
+
 status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
                                   SensorCharacteristics* sensor_chars /*out*/) {
   if ((metadata == nullptr) || (sensor_chars == nullptr)) {
@@ -52,6 +70,37 @@ status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
     sensor_chars->full_res_width = entry.data.i32[0];
     sensor_chars->full_res_height = entry.data.i32[1];
     sensor_chars->quad_bayer_sensor = true;
+  }
+
+  if (sensor_chars->quad_bayer_sensor) {
+    ret = metadata->Get(ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE, &entry);
+    if ((ret == OK) && (entry.count == 4)) {
+      google_camera_hal::Rect rect;
+      if (google_camera_hal::utils::GetSensorActiveArraySize(metadata, &rect) !=
+          OK) {
+        return BAD_VALUE;
+      }
+      sensor_chars->raw_crop_region_unzoomed[0] = rect.left;    // left
+      sensor_chars->raw_crop_region_unzoomed[1] = rect.top;     // top
+      sensor_chars->raw_crop_region_unzoomed[2] = rect.right;   // right
+      sensor_chars->raw_crop_region_unzoomed[3] = rect.bottom;  // bottom
+
+      // 2x zoom , raw crop width / height = 1/2 sensor width / height. top /
+      // left edge = 1/4 sensor width. bottom / right edge = 1/2 + 1 /4 * sensor
+      // width / height: Refer to case 1 in
+      // https://developer.android.com/reference/android/hardware/camera2/CaptureRequest#SCALER_CROP_REGION
+      // for a visual representation.
+      sensor_chars->raw_crop_region_zoomed[0] =
+          rect.left + (rect.right - rect.left) / 4;  // left
+      sensor_chars->raw_crop_region_zoomed[1] =
+          rect.top + (rect.bottom - rect.top) / 4;  // top
+      sensor_chars->raw_crop_region_zoomed[2] =
+          sensor_chars->raw_crop_region_zoomed[0] +
+          (rect.right - rect.left) / 2;  // right
+      sensor_chars->raw_crop_region_zoomed[3] =
+          sensor_chars->raw_crop_region_zoomed[1] +
+          (rect.bottom - rect.top) / 2;  // bottom
+    }
   }
 
   ret = metadata->Get(ANDROID_REQUEST_MAX_NUM_OUTPUT_STREAMS, &entry);
@@ -315,6 +364,8 @@ status_t GetSensorCharacteristics(const HalCameraMetadata* metadata,
   if (HasCapability(metadata,
                     ANDROID_REQUEST_AVAILABLE_CAPABILITIES_STREAM_USE_CASE)) {
     sensor_chars->support_stream_use_case = true;
+    sensor_chars->end_valid_stream_use_case = GetLastStreamUseCase(metadata);
+
   } else {
     sensor_chars->support_stream_use_case = false;
   }

@@ -548,7 +548,7 @@ bool EmulatedSensor::IsStreamCombinationSupported(
         return false;
       }
     } else if (stream.use_case >
-               ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL) {
+               sensor_chars.at(logical_id).end_valid_stream_use_case) {
       ALOGE("%s: Stream with use case %d is not supported!", __FUNCTION__,
             stream.use_case);
       return false;
@@ -562,8 +562,21 @@ bool EmulatedSensor::IsStreamCombinationSupported(
               __FUNCTION__, stream.use_case, stream.format);
           return false;
         }
+      } else if ((stream.format == HAL_PIXEL_FORMAT_RAW16) ^
+                 (stream.use_case ==
+                  ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_CROPPED_RAW)) {
+        // Either both stream use case == CROPPED_RAW and format == RAW16, or
+        // stream use case != CROPPED_RAW and format != RAW16 for the
+        // combination to be valid.
+        ALOGE(
+            "%s: Stream with use case CROPPED_RAW isn't compatible with non "
+            "RAW_SENSOR formats",
+            __FUNCTION__);
+        return false;
+
       } else if (stream.format != HAL_PIXEL_FORMAT_YCBCR_420_888 &&
-                 stream.format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
+                 stream.format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED &&
+                 stream.format != HAL_PIXEL_FORMAT_RAW16) {
         ALOGE("%s: Stream with use case %d isn't compatible with format %d",
               __FUNCTION__, stream.use_case, stream.format);
         return false;
@@ -888,6 +901,13 @@ bool EmulatedSensor::threadLoop() {
       switch ((*b)->format) {
         case PixelFormat::RAW16:
           sensor_binning_factor_info_[(*b)->camera_id].has_raw_stream = true;
+          if (!sensor_binning_factor_info_[(*b)->camera_id]
+                   .has_cropped_raw_stream &&
+              (*b)->use_case ==
+                  ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_CROPPED_RAW) {
+            sensor_binning_factor_info_[(*b)->camera_id].has_cropped_raw_stream =
+                true;
+          }
           break;
         default:
           sensor_binning_factor_info_[(*b)->camera_id].has_non_raw_stream = true;
@@ -939,9 +959,20 @@ bool EmulatedSensor::threadLoop() {
               break;
             }
             if (default_mode_for_qb) {
-              CaptureRawBinned(
-                  (*b)->plane.img.img, (*b)->plane.img.stride_in_bytes,
-                  device_settings->second.gain, device_chars->second);
+              if (device_settings->second.zoom_ratio > 2.0f &&
+                  ((*b)->use_case ==
+                   ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_CROPPED_RAW)) {
+                sensor_binning_factor_info_[(*b)->camera_id]
+                    .raw_in_sensor_zoom_applied = true;
+                CaptureRawInSensorZoom(
+                    (*b)->plane.img.img, (*b)->plane.img.stride_in_bytes,
+                    device_settings->second.gain, device_chars->second);
+
+              } else {
+                CaptureRawBinned(
+                    (*b)->plane.img.img, (*b)->plane.img.stride_in_bytes,
+                    device_settings->second.gain, device_chars->second);
+              }
             } else {
               CaptureRawFullRes(
                   (*b)->plane.img.img, (*b)->plane.img.stride_in_bytes,
@@ -1213,6 +1244,18 @@ void EmulatedSensor::ReturnResults(
       }
       result->result_metadata->Set(ANDROID_SENSOR_RAW_BINNING_FACTOR_USED,
                                    &raw_binned_factor_used, 1);
+      if (info.has_cropped_raw_stream) {
+        if (info.raw_in_sensor_zoom_applied) {
+          result->result_metadata->Set(
+              ANDROID_SCALER_RAW_CROP_REGION,
+              device_chars->second.raw_crop_region_zoomed, 4);
+
+        } else {
+          result->result_metadata->Set(
+              ANDROID_SCALER_RAW_CROP_REGION,
+              device_chars->second.raw_crop_region_unzoomed, 4);
+        }
+      }
     }
     if (logical_settings->second.lens_shading_map_mode ==
         ANDROID_STATISTICS_LENS_SHADING_MAP_MODE_ON) {
@@ -1388,66 +1431,37 @@ status_t EmulatedSensor::RemosaicRAW16Image(uint16_t* img_in, uint16_t* img_out,
 void EmulatedSensor::CaptureRawBinned(uint8_t* img, size_t row_stride_in_bytes,
                                       uint32_t gain,
                                       const SensorCharacteristics& chars) {
-  ATRACE_CALL();
-  // inc = how many pixels to skip while reading every next pixel
-  float total_gain = gain / 100.0 * GetBaseGainFactor(chars.max_raw_value);
-  float noise_var_gain = total_gain * total_gain;
-  float read_noise_var =
-      kReadNoiseVarBeforeGain * noise_var_gain + kReadNoiseVarAfterGain;
-  int bayer_select[4] = {EmulatedScene::R, EmulatedScene::Gr, EmulatedScene::Gb,
-                         EmulatedScene::B};
-  scene_->SetReadoutPixel(0, 0);
-  for (unsigned int out_y = 0; out_y < chars.height; out_y++) {
-    // Stride still stays width since the buffer is binned size.
-    int* bayer_row = bayer_select + (out_y & 0x1) * 2;
-    uint16_t* px = (uint16_t*)img + out_y * (row_stride_in_bytes / 2);
-    for (unsigned int out_x = 0; out_x < chars.width; out_x++) {
-      int color_idx = bayer_row[out_x & 0x1];
-      uint16_t raw_count = 0;
-      // Color  filter will be the same for each quad.
-      uint32_t electron_count = 0;
-      int x, y;
-      float norm_x = (float)out_x / chars.width;
-      float norm_y = (float)out_y / chars.height;
-      x = static_cast<int>(chars.full_res_width * norm_x);
-      y = static_cast<int>(chars.full_res_height * norm_y);
+  CaptureRaw(img, row_stride_in_bytes, gain, chars, /*in_sensor_zoom*/ false,
+             /*binned*/ true);
+  return;
+}
 
-      x = std::min(std::max(x, 0), (int)chars.full_res_width - 1);
-      y = std::min(std::max(y, 0), (int)chars.full_res_height - 1);
-
-      scene_->SetReadoutPixel(x, y);
-
-      const uint32_t* pixel = scene_->GetPixelElectrons();
-      electron_count = pixel[color_idx];
-      // TODO: Better pixel saturation curve?
-      electron_count = (electron_count < kSaturationElectrons)
-                           ? electron_count
-                           : kSaturationElectrons;
-
-      // TODO: Better A/D saturation curve?
-      raw_count = electron_count * total_gain;
-      raw_count =
-          (raw_count < chars.max_raw_value) ? raw_count : chars.max_raw_value;
-
-      // Calculate noise value
-      // TODO: Use more-correct Gaussian instead of uniform noise
-      float photon_noise_var = electron_count * noise_var_gain;
-      float noise_stddev = sqrtf_approx(read_noise_var + photon_noise_var);
-      // Scaled to roughly match gaussian/uniform noise stddev
-      float noise_sample = rand_r(&rand_seed_) * (2.5 / (1.0 + RAND_MAX)) - 1.25;
-
-      raw_count += chars.black_level_pattern[color_idx];
-      raw_count += noise_stddev * noise_sample;
-      *px++ = raw_count;
-    }
-  }
-  ALOGVV("Binned RAW sensor image captured");
+void EmulatedSensor::CaptureRawInSensorZoom(uint8_t* img,
+                                            size_t row_stride_in_bytes,
+                                            uint32_t gain,
+                                            const SensorCharacteristics& chars) {
+  CaptureRaw(img, row_stride_in_bytes, gain, chars, /*in_sensor_zoom*/ true,
+             /*binned*/ false);
+  return;
 }
 
 void EmulatedSensor::CaptureRawFullRes(uint8_t* img, size_t row_stride_in_bytes,
                                        uint32_t gain,
                                        const SensorCharacteristics& chars) {
+  CaptureRaw(img, row_stride_in_bytes, gain, chars, /*inSensorZoom*/ false,
+             /*binned*/ false);
+  return;
+}
+
+void EmulatedSensor::CaptureRaw(uint8_t* img, size_t row_stride_in_bytes,
+                                uint32_t gain,
+                                const SensorCharacteristics& chars,
+                                bool in_sensor_zoom, bool binned) {
   ATRACE_CALL();
+  if (in_sensor_zoom && binned) {
+    ALOGE("%s: Can't perform in-sensor zoom in binned mode", __FUNCTION__);
+    return;
+  }
   float total_gain = gain / 100.0 * GetBaseGainFactor(chars.max_raw_value);
   float noise_var_gain = total_gain * total_gain;
   float read_noise_var =
@@ -1457,14 +1471,30 @@ void EmulatedSensor::CaptureRawFullRes(uint8_t* img, size_t row_stride_in_bytes,
   // RGGB
   int bayer_select[4] = {EmulatedScene::R, EmulatedScene::Gr, EmulatedScene::Gb,
                          EmulatedScene::B};
+  const float raw_zoom_ratio = in_sensor_zoom ? 2.0f : 1.0f;
+  unsigned int image_width =
+      in_sensor_zoom || binned ? chars.width : chars.full_res_width;
+  unsigned int image_height =
+      in_sensor_zoom || binned ? chars.height : chars.full_res_height;
+  const float norm_left_top = 0.5f - 0.5f / raw_zoom_ratio;
+  for (unsigned int out_y = 0; out_y < image_height; out_y++) {
+    int* bayer_row = bayer_select + (out_y & 0x1) * 2;
+    uint16_t* px = (uint16_t*)img + out_y * (row_stride_in_bytes / 2);
 
-  for (unsigned int y = 0; y < chars.full_res_height; y++) {
-    int* bayer_row = bayer_select + (y & 0x1) * 2;
-    uint16_t* px = (uint16_t*)img + y * (row_stride_in_bytes / 2);
-    for (unsigned int x = 0; x < chars.full_res_width; x++) {
-      int color_idx = chars.quad_bayer_sensor ? GetQuadBayerColor(x, y)
-                                              : bayer_row[x & 0x1];
+    float norm_y = out_y / (image_height * raw_zoom_ratio);
+    int y = static_cast<int>(chars.full_res_height * (norm_left_top + norm_y));
+    y = std::min(std::max(y, 0), (int)chars.full_res_height - 1);
+
+    for (unsigned int out_x = 0; out_x < image_width; out_x++) {
+      int color_idx = chars.quad_bayer_sensor && !(in_sensor_zoom || binned)
+                          ? GetQuadBayerColor(out_x, out_y)
+                          : bayer_row[out_x & 0x1];
+      float norm_x = out_x / (image_width * raw_zoom_ratio);
+      int x = static_cast<int>(chars.full_res_width * (norm_left_top + norm_x));
+      x = std::min(std::max(x, 0), (int)chars.full_res_width - 1);
+
       uint32_t electron_count;
+      scene_->SetReadoutPixel(x, y);
       electron_count = scene_->GetPixelElectrons()[color_idx];
 
       // TODO: Better pixel saturation curve?

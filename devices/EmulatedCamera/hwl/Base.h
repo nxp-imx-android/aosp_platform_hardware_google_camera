@@ -54,6 +54,7 @@ struct SensorBuffer {
   PixelFormat format;
   android_dataspace_t dataSpace;
   int32_t color_space;
+  int32_t use_case;
   StreamBuffer stream_buffer;
   HwlPipelineCallback callback;
   int acquire_fence_fd;
@@ -75,6 +76,7 @@ struct SensorBuffer {
         dataSpace(HAL_DATASPACE_UNKNOWN),
         color_space(
             ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED),
+        use_case(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
         acquire_fence_fd(-1),
         is_input(false),
         is_failed_request(false),
