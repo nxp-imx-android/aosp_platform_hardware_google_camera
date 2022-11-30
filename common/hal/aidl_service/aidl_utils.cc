@@ -724,6 +724,11 @@ status_t ConvertToHalMetadata(
       ALOGE("%s: request_metadata_queue is nullptr", __FUNCTION__);
       return BAD_VALUE;
     }
+    if (message_queue_setting_size < calculate_camera_metadata_size(0, 0)) {
+      ALOGE("%s: invalid message queue setting size: %u", __FUNCTION__,
+            message_queue_setting_size);
+      return BAD_VALUE;
+    }
 
     metadata_queue_settings.resize(message_queue_setting_size);
     bool success = request_metadata_queue->read(metadata_queue_settings.data(),
