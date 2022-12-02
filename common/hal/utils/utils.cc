@@ -33,8 +33,6 @@ namespace utils {
 
 constexpr char kRealtimeThreadSetProp[] =
     "persist.vendor.camera.realtimethread";
-constexpr char k60to30FPSThrottleSetProp[] =
-    "persist.vendor.camera.60to30FPSThermalThrottle";
 
 constexpr uint32_t kMinSupportedSoftwareDenoiseDimension = 1000;
 
@@ -380,10 +378,17 @@ bool IsSessionParameterCompatible(const HalCameraMetadata* old_session,
       // Do not reconfigure session if max FPS hasn't changed or in
       // the special case that AE FPS is throttling [60, 60] to [30, 30]
       // from GCA side, provided the setprop is enabled
+      uint8_t video_60_to_30fps_thermal_throtlle = 0;
+      camera_metadata_ro_entry_t video_60_to_30fps_throttle_entry;
+      if (new_session->Get(kVideo60to30FPSThermalThrottle,
+                           &video_60_to_30fps_throttle_entry) == OK) {
+        video_60_to_30fps_thermal_throtlle =
+            video_60_to_30fps_throttle_entry.data.u8[0];
+      }
+
       if (old_max_fps == new_max_fps ||
-          (property_get_bool(k60to30FPSThrottleSetProp, false) &&
-           (old_min_fps == 60) && (old_max_fps == 60) && (new_min_fps == 30) &&
-           (new_max_fps == 30))) {
+          (video_60_to_30fps_thermal_throtlle && (old_min_fps == 60) &&
+           (old_max_fps == 60) && (new_min_fps == 30) && (new_max_fps == 30))) {
         ALOGI("%s: Ignore fps (%d, %d) to (%d, %d)", __FUNCTION__, old_min_fps,
               old_max_fps, new_min_fps, new_max_fps);
         continue;
