@@ -207,6 +207,7 @@ class EmulatedRequestState {
   uint8_t af_state_ = ANDROID_CONTROL_AF_STATE_INACTIVE;
   uint8_t af_trigger_ = ANDROID_CONTROL_AF_TRIGGER_IDLE;
   uint8_t ae_trigger_ = ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE;
+  uint8_t autoframing_ = ANDROID_CONTROL_AUTOFRAMING_OFF;
   FPSRange ae_target_fps_ = {0, 0};
   float zoom_ratio_ = 1.0f;
   uint8_t extended_scene_mode_ = ANDROID_CONTROL_EXTENDED_SCENE_MODE_DISABLED;

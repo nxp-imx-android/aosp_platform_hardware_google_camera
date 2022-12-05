@@ -724,6 +724,17 @@ status_t EmulatedRequestState::InitializeSensorSettings(
     }
   }
 
+  // Check autoframing
+  ret = request_settings_->Get(ANDROID_CONTROL_AUTOFRAMING, &entry);
+  if ((ret == OK) && (entry.count == 1)) {
+    autoframing_ = entry.data.i32[0];
+    if (autoframing_ == ANDROID_CONTROL_AUTOFRAMING_ON) {
+      // Set zoom_ratio to be a hard-coded value to test autoframing.
+      zoom_ratio_ = 1.7f;
+      vstab_mode = ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF;
+    }
+  }
+
   // Check video stabilization parameter
   uint8_t edge_mode = ANDROID_EDGE_MODE_OFF;
   ret = request_settings_->Get(ANDROID_EDGE_MODE, &entry);
@@ -894,6 +905,13 @@ std::unique_ptr<HwlPipelineResult> EmulatedRequestState::InitializeResult(
                                &settings_override, 1);
   result->result_metadata->Set(ANDROID_CONTROL_SETTINGS_OVERRIDING_FRAME_NUMBER,
                                (int32_t*)&overriding_frame_number, 1);
+  result->result_metadata->Set(ANDROID_CONTROL_AUTOFRAMING, &autoframing_, 1);
+  uint8_t autoframing_state = ANDROID_CONTROL_AUTOFRAMING_STATE_INACTIVE;
+  if (autoframing_ == ANDROID_CONTROL_AUTOFRAMING_ON) {
+    autoframing_state = ANDROID_CONTROL_AUTOFRAMING_STATE_CONVERGED;
+  }
+  result->result_metadata->Set(ANDROID_CONTROL_AUTOFRAMING_STATE,
+                               &autoframing_state, 1);
 
   int32_t fps_range[] = {ae_target_fps_.min_fps, ae_target_fps_.max_fps};
   result->result_metadata->Set(ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps_range,
