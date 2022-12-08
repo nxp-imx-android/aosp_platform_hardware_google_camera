@@ -74,6 +74,9 @@ enum class SmoothyMode : uint32_t {
   // done at app side which is N frame later than HAL where N is the pipeline
   // depth.
   kDelayedTrackingMode,
+
+  // Indicates macro video mode.
+  kMacroVideoMode,
 };
 
 // Logical camera vendor tags
