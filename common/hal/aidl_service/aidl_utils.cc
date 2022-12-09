@@ -15,11 +15,12 @@
  */
 
 #define LOG_TAG "GCH_AidlUtils"
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #include "aidl_utils.h"
 
 #include <aidlcommonsupport/NativeHandle.h>
 #include <log/log.h>
+#include <system/camera_metadata.h>
 
 #include <regex>
 
@@ -740,6 +741,16 @@ status_t ConvertToHalMetadata(
   if (metadata == nullptr) {
     *hal_metadata = nullptr;
     return OK;
+  }
+
+  // Validates the injected metadata structure. This prevents memory access
+  // violation that could be introduced by malformed metadata.
+  // (b/236688120) In general we trust metadata sent from Framework, but this is
+  // to defend an exploit chain that skips Framework's validation.
+  if (validate_camera_metadata_structure(metadata, /*expected_size=*/NULL) !=
+      OK) {
+    ALOGE("%s: Failed to validate the metadata structure", __FUNCTION__);
+    return BAD_VALUE;
   }
 
   *hal_metadata = google_camera_hal::HalCameraMetadata::Clone(metadata);
