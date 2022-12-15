@@ -27,7 +27,7 @@ cc_library_headers {
     ],
 }
 
-cc_library_shared {
+cc_library {
     name: "libgoogle_camera_hal_tests",
     defaults: ["google_camera_hal_defaults"],
     compile_multilib: "first",
