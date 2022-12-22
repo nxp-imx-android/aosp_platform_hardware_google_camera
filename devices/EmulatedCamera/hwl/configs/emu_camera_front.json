@@ -311,6 +311,7 @@
    "RAW",
    "REMOSAIC_REPROCESSING",
    "DYNAMIC_RANGE_TEN_BIT",
+   "STREAM_USE_CASE",
    "COLOR_SPACE_PROFILES"
   ],
   "android.request.availableDynamicRangeProfilesMap": [
@@ -369,6 +370,15 @@
    "33",
    "35"
   ],
+ "android.scaler.availableStreamUseCases": [
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+ ],
   "android.scaler.availableInputOutputFormatsMapMaximumResolution" : [
    "32",
    "3",
@@ -3548,7 +3558,8 @@
    "1114123",
    "917530",
    "851985",
-   "917536"
+   "917536",
+   "851994"
   ],
   "android.request.maxNumOutputStreams": [
    "1",

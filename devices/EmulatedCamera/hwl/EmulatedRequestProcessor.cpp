@@ -375,6 +375,7 @@ std::unique_ptr<SensorBuffer> EmulatedRequestProcessor::CreateSensorBuffer(
   buffer->format = static_cast<PixelFormat>(stream.override_format);
   buffer->dataSpace = stream.override_data_space;
   buffer->color_space = stream.color_space;
+  buffer->use_case = stream.use_case;
   buffer->stream_buffer = stream_buffer;
   buffer->pipeline_id = pipeline_id;
   buffer->callback = callback;

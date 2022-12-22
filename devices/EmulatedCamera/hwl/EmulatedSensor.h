@@ -178,8 +178,12 @@ struct SensorCharacteristics {
   bool is_10bit_dynamic_range_capable = false;
   DynamicRangeProfileMap dynamic_range_profiles;
   bool support_stream_use_case = false;
+  int64_t end_valid_stream_use_case =
+      ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL;
   bool support_color_space_profiles = false;
   ColorSpaceProfileMap color_space_profiles;
+  int32_t raw_crop_region_zoomed[4] = {0};
+  int32_t raw_crop_region_unzoomed[4] = {0};
 };
 
 // Maps logical/physical camera ids to sensor characteristics
@@ -380,6 +384,8 @@ class EmulatedSensor : private Thread, public virtual RefBase {
     bool has_non_raw_stream = false;
     bool quad_bayer_sensor = false;
     bool max_res_request = false;
+    bool has_cropped_raw_stream = false;
+    bool raw_in_sensor_zoom_applied = false;
   };
 
   std::map<uint32_t, SensorBinningFactorInfo> sensor_binning_factor_info_;
@@ -403,6 +409,11 @@ class EmulatedSensor : private Thread, public virtual RefBase {
 
   void CaptureRawFullRes(uint8_t* img, size_t row_stride_in_bytes,
                          uint32_t gain, const SensorCharacteristics& chars);
+  void CaptureRawInSensorZoom(uint8_t* img, size_t row_stride_in_bytes,
+                              uint32_t gain, const SensorCharacteristics& chars);
+  void CaptureRaw(uint8_t* img, size_t row_stride_in_bytes, uint32_t gain,
+                  const SensorCharacteristics& chars, bool in_sensor_zoom,
+                  bool binned);
 
   enum RGBLayout { RGB, RGBA, ARGB };
   void CaptureRGB(uint8_t* img, uint32_t width, uint32_t height,
