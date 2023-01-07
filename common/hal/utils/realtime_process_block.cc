@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #define LOG_TAG "GCH_RealtimeProcessBlock"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
+#include "realtime_process_block.h"
+
 #include <log/log.h>
 #include <utils/Trace.h>
 
 #include "hal_utils.h"
-#include "realtime_process_block.h"
 #include "result_processor.h"
 
 namespace android {
