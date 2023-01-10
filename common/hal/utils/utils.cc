@@ -375,7 +375,20 @@ bool IsSessionParameterCompatible(const HalCameraMetadata* old_session,
       int32_t old_max_fps = old_entry.data.i32[1];
       int32_t new_min_fps = new_entry.data.i32[0];
       int32_t new_max_fps = new_entry.data.i32[1];
-      if (old_max_fps == new_max_fps) {
+      // Do not reconfigure session if max FPS hasn't changed or in
+      // the special case that AE FPS is throttling [60, 60] to [30, 30]
+      // from GCA side, provided the setprop is enabled
+      uint8_t video_60_to_30fps_thermal_throtlle = 0;
+      camera_metadata_ro_entry_t video_60_to_30fps_throttle_entry;
+      if (new_session->Get(kVideo60to30FPSThermalThrottle,
+                           &video_60_to_30fps_throttle_entry) == OK) {
+        video_60_to_30fps_thermal_throtlle =
+            video_60_to_30fps_throttle_entry.data.u8[0];
+      }
+
+      if (old_max_fps == new_max_fps ||
+          (video_60_to_30fps_thermal_throtlle && (old_min_fps == 60) &&
+           (old_max_fps == 60) && (new_min_fps == 30) && (new_max_fps == 30))) {
         ALOGI("%s: Ignore fps (%d, %d) to (%d, %d)", __FUNCTION__, old_min_fps,
               old_max_fps, new_min_fps, new_max_fps);
         continue;
@@ -522,6 +535,13 @@ status_t GetStreamUseCases(const HalCameraMetadata* static_metadata,
 
 bool IsSecuredStream(const Stream& stream) {
   return (stream.usage & GRALLOC_USAGE_PROTECTED) != 0u;
+}
+
+bool IsStreamUseCasesVideoCall(const Stream& stream) {
+  return (stream.use_case ==
+          ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_CALL)
+             ? true
+             : false;
 }
 
 }  // namespace utils

@@ -39,6 +39,7 @@ bool IsDepthStream(const Stream& stream);
 bool IsOutputZslStream(const Stream& stream);
 bool IsSoftwareDenoiseEligibleSnapshotStream(const Stream& stream);
 bool IsSecuredStream(const Stream& stream);
+bool IsStreamUseCasesVideoCall(const Stream& stream);
 
 bool HasCapability(const HalCameraMetadata* metadata, uint8_t capability);
 
