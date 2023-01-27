@@ -96,7 +96,9 @@ cc_defaults {
         "android.hardware.graphics.mapper@2.0",
         "android.hardware.graphics.mapper@3.0",
         "android.hardware.graphics.mapper@4.0",
+        "android.hardware.thermal@1.0",
         "android.hardware.thermal@2.0",
+        "android.hardware.thermal-V1-ndk",
         "libbinder",
         "libbinder_ndk",
         "libbase",
@@ -115,6 +117,7 @@ cc_defaults {
     ],
     static_libs: [
         "libaidlcommonsupport",
+        "//hardware/google/pixel:libpixelthermalwrapper",
     ],
 }
 

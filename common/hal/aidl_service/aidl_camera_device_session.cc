@@ -19,11 +19,14 @@
 //#define LOG_NDEBUG 0
 #include "aidl_camera_device_session.h"
 
+#include <aidl/android/hardware/thermal/IThermal.h>
 #include <android/binder_ibinder_platform.h>
+#include <android/binder_manager.h>
 #include <cutils/properties.h>
 #include <cutils/trace.h>
 #include <log/log.h>
 #include <malloc.h>
+#include <pixelthermalwrapper/ThermalHidlWrapper.h>
 #include <utils/Trace.h>
 
 #include "aidl_profiler.h"
@@ -385,7 +388,27 @@ status_t AidlCameraDeviceSession::Initialize(
     return res;
   }
 
-  thermal_ = android::hardware::thermal::V2_0::IThermal::getService();
+  const std::string thermal_instance_name =
+      std::string(::aidl::android::hardware::thermal::IThermal::descriptor) +
+      "/default";
+  if (AServiceManager_isDeclared(thermal_instance_name.c_str())) {
+    auto thermal_aidl_service =
+        ::aidl::android::hardware::thermal::IThermal::fromBinder(ndk::SpAIBinder(
+            AServiceManager_waitForService(thermal_instance_name.c_str())));
+    if (thermal_aidl_service) {
+      thermal_ =
+          sp<::aidl::android::hardware::thermal::ThermalHidlWrapper>::make(
+              thermal_aidl_service);
+    } else {
+      ALOGW("Unable to get Thermal AIDL service; trying Thermal HIDL service");
+    }
+  } else {
+    ALOGW("Thermal AIDL service is not declared; trying Thermal HIDL service");
+  }
+
+  if (!thermal_) {
+    thermal_ = android::hardware::thermal::V2_0::IThermal::getService();
+  }
   if (thermal_ == nullptr) {
     ALOGE("%s: Getting thermal failed.", __FUNCTION__);
     // Continue without getting thermal information.
