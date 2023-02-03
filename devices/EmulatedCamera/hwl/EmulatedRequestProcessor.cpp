@@ -640,6 +640,11 @@ Return<void> EmulatedRequestProcessor::SensorHandler::onEvent(const Event& e) {
     const uint32_t earth_accel = 9;  // Switch threshold [m/s^2]
     uint32_t x_accel = e.u.vec3.x;
     uint32_t y_accel = e.u.vec3.y;
+    uint32_t z_accel = abs(e.u.vec3.z);
+    if (z_accel == earth_accel) {
+      return Void();
+    }
+
     if (x_accel == earth_accel) {
       processor->screen_rotation_ = 270;
     } else if (x_accel == -earth_accel) {
