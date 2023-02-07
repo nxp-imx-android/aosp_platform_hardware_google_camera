@@ -50,7 +50,6 @@ apex_defaults {
     updatable: false,
     // Install the apex in /vendor/apex
     soc_specific: true,
-    apex_name: "com.google.emulated.camera.provider.hal",
     binaries: [
         "android.hardware.camera.provider@2.7-service-google",
     ],
@@ -84,5 +83,4 @@ apex {
     name: "com.google.emulated.camera.provider.hal.fastscenecycle",
     defaults: ["com.google.emulated.camera.provider.hal.defaults"],
     native_shared_libs: ["libgooglecamerahwl_impl_fast_scene_cycle"],
-    multi_install_skip_symbol_files: true,
 }
