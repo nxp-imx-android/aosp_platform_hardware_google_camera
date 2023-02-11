@@ -291,7 +291,7 @@ status_t EmulatedRequestProcessor::LockSensorBuffer(
     return BAD_VALUE;
   }
 
-  auto usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
+  auto usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
   bool isYUV_420_888 = stream.override_format == HAL_PIXEL_FORMAT_YCBCR_420_888;
   bool isP010 = static_cast<android_pixel_format_v1_1_t>(
                     stream.override_format) == HAL_PIXEL_FORMAT_YCBCR_P010;
