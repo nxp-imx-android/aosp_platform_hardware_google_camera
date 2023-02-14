@@ -35,10 +35,11 @@ namespace google_camera_hal {
 std::unique_ptr<ResultDispatcher> ResultDispatcher::Create(
     uint32_t partial_result_count,
     ProcessCaptureResultFunc process_capture_result, NotifyFunc notify,
-    std::string_view name) {
+    const StreamConfiguration& stream_config, std::string_view name) {
   ATRACE_CALL();
-  auto dispatcher = std::unique_ptr<ResultDispatcher>(new ResultDispatcher(
-      partial_result_count, process_capture_result, notify, name));
+  auto dispatcher = std::unique_ptr<ResultDispatcher>(
+      new ResultDispatcher(partial_result_count, process_capture_result, notify,
+                           stream_config, name));
   if (dispatcher == nullptr) {
     ALOGE("[%s] %s: Creating ResultDispatcher failed.",
           std::string(name).c_str(), __FUNCTION__);
@@ -51,7 +52,7 @@ std::unique_ptr<ResultDispatcher> ResultDispatcher::Create(
 ResultDispatcher::ResultDispatcher(
     uint32_t partial_result_count,
     ProcessCaptureResultFunc process_capture_result, NotifyFunc notify,
-    std::string_view name)
+    const StreamConfiguration& stream_config, std::string_view name)
     : kPartialResultCount(partial_result_count),
       name_(name),
       process_capture_result_(process_capture_result),
@@ -78,6 +79,7 @@ ResultDispatcher::ResultDispatcher(
             __FUNCTION__, strerror(errno));
     }
   }
+  InitializeGroupStreamIdsMap(stream_config);
 }
 
 ResultDispatcher::~ResultDispatcher() {
@@ -183,21 +185,23 @@ status_t ResultDispatcher::AddPendingBufferLocked(uint32_t frame_number,
                                                   const StreamBuffer& buffer,
                                                   bool is_input) {
   ATRACE_CALL();
-  uint32_t stream_id = buffer.stream_id;
-  if (stream_pending_buffers_map_.find(stream_id) ==
+  StreamKey stream_key = CreateStreamKey(buffer.stream_id);
+  if (stream_pending_buffers_map_.find(stream_key) ==
       stream_pending_buffers_map_.end()) {
-    stream_pending_buffers_map_[stream_id] = std::map<uint32_t, PendingBuffer>();
+    stream_pending_buffers_map_[stream_key] =
+        std::map<uint32_t, PendingBuffer>();
   }
 
-  if (stream_pending_buffers_map_[stream_id].find(frame_number) !=
-      stream_pending_buffers_map_[stream_id].end()) {
-    ALOGE("[%s] %s: Pending buffer of stream %u for frame %u already exists.",
-          name_.c_str(), __FUNCTION__, stream_id, frame_number);
+  if (stream_pending_buffers_map_[stream_key].find(frame_number) !=
+      stream_pending_buffers_map_[stream_key].end()) {
+    ALOGE("[%s] %s: Pending buffer of stream %s for frame %u already exists.",
+          name_.c_str(), __FUNCTION__, DumpStreamKey(stream_key).c_str(),
+          frame_number);
     return ALREADY_EXISTS;
   }
 
   PendingBuffer pending_buffer = {.is_input = is_input};
-  stream_pending_buffers_map_[stream_id][frame_number] = pending_buffer;
+  stream_pending_buffers_map_[stream_key][frame_number] = pending_buffer;
   return OK;
 }
 
@@ -385,24 +389,26 @@ status_t ResultDispatcher::AddBuffer(uint32_t frame_number,
   ATRACE_CALL();
   std::lock_guard<std::mutex> lock(result_lock_);
 
-  uint32_t stream_id = buffer.stream_id;
-  auto pending_buffers_it = stream_pending_buffers_map_.find(stream_id);
+  StreamKey stream_key = CreateStreamKey(buffer.stream_id);
+  auto pending_buffers_it = stream_pending_buffers_map_.find(stream_key);
   if (pending_buffers_it == stream_pending_buffers_map_.end()) {
-    ALOGE("[%s] %s: Cannot find the pending buffer for stream %u",
-          name_.c_str(), __FUNCTION__, stream_id);
+    ALOGE("[%s] %s: Cannot find the pending buffer for stream %s",
+          name_.c_str(), __FUNCTION__, DumpStreamKey(stream_key).c_str());
     return NAME_NOT_FOUND;
   }
 
   auto pending_buffer_it = pending_buffers_it->second.find(frame_number);
   if (pending_buffer_it == pending_buffers_it->second.end()) {
-    ALOGE("[%s] %s: Cannot find the pending buffer for stream %u for frame %u",
-          name_.c_str(), __FUNCTION__, stream_id, frame_number);
+    ALOGE("[%s] %s: Cannot find the pending buffer for stream %s for frame %u",
+          name_.c_str(), __FUNCTION__, DumpStreamKey(stream_key).c_str(),
+          frame_number);
     return NAME_NOT_FOUND;
   }
 
   if (pending_buffer_it->second.ready) {
-    ALOGE("[%s] %s: Already received a buffer for stream %u for frame %u",
-          name_.c_str(), __FUNCTION__, stream_id, frame_number);
+    ALOGE("[%s] %s: Already received a buffer for stream %s for frame %u",
+          name_.c_str(), __FUNCTION__, DumpStreamKey(stream_key).c_str(),
+          frame_number);
     return ALREADY_EXISTS;
   }
 
@@ -453,12 +459,43 @@ void ResultDispatcher::PrintTimeoutMessages() {
           name_.c_str(), __FUNCTION__, frame_number, final_metadata.ready);
   }
 
-  for (auto& [stream_id, pending_buffers] : stream_pending_buffers_map_) {
+  for (auto& [stream_key, pending_buffers] : stream_pending_buffers_map_) {
     for (auto& [frame_number, pending_buffer] : pending_buffers) {
-      ALOGW("[%s] %s: pending buffer of stream %d for frame %u ready %d",
-            name_.c_str(), __FUNCTION__, stream_id, frame_number,
-            pending_buffer.ready);
+      ALOGW("[%s] %s: pending buffer of stream %s for frame %u ready %d",
+            name_.c_str(), __FUNCTION__, DumpStreamKey(stream_key).c_str(),
+            frame_number, pending_buffer.ready);
     }
+  }
+}
+
+void ResultDispatcher::InitializeGroupStreamIdsMap(
+    const StreamConfiguration& stream_config) {
+  std::lock_guard<std::mutex> lock(result_lock_);
+  for (const auto& stream : stream_config.streams) {
+    if (stream.group_id != -1) {
+      group_stream_map_[stream.id] = stream.group_id;
+    }
+  }
+}
+
+ResultDispatcher::StreamKey ResultDispatcher::CreateStreamKey(
+    int32_t stream_id) const {
+  if (group_stream_map_.count(stream_id) == 0) {
+    return StreamKey(stream_id, StreamKeyType::kSingleStream);
+  } else {
+    return StreamKey(group_stream_map_.at(stream_id),
+                     StreamKeyType::kGroupStream);
+  }
+}
+
+std::string ResultDispatcher::DumpStreamKey(const StreamKey& stream_key) const {
+  switch (stream_key.second) {
+    case StreamKeyType::kSingleStream:
+      return std::to_string(stream_key.first);
+    case StreamKeyType::kGroupStream:
+      return "group " + std::to_string(stream_key.first);
+    default:
+      return "Invalid stream key type";
   }
 }
 
