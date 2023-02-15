@@ -117,7 +117,7 @@ cc_defaults {
     ],
     static_libs: [
         "libaidlcommonsupport",
-        "//hardware/google/pixel:libpixelthermalwrapper",
+        "libthermalutils",
     ],
 }
 

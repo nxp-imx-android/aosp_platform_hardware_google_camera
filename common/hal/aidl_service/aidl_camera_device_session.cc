@@ -26,7 +26,7 @@
 #include <cutils/trace.h>
 #include <log/log.h>
 #include <malloc.h>
-#include <pixelthermalwrapper/ThermalHidlWrapper.h>
+#include <thermalutils/ThermalHidlWrapper.h>
 #include <utils/Trace.h>
 
 #include "aidl_profiler.h"
