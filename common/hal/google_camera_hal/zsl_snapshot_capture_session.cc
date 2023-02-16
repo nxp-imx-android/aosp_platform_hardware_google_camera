@@ -744,7 +744,7 @@ status_t ZslSnapshotCaptureSession::Initialize(
     partial_result_count_ = partial_result_entry.data.i32[0];
   }
   result_dispatcher_ = ZslResultDispatcher::Create(
-      partial_result_count_, process_capture_result, notify);
+      partial_result_count_, process_capture_result, notify, stream_config);
   if (result_dispatcher_ == nullptr) {
     ALOGE("%s: Cannot create result dispatcher.", __FUNCTION__);
     return UNKNOWN_ERROR;
