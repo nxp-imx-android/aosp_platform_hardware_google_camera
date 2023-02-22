@@ -339,10 +339,10 @@ static void SplitStreamCombination(
       input_stream_config->streams.push_back(stream);
       continue;
     }
-    if (stream.used_in_default_resolution_mode) {
+    if (stream.intended_for_default_resolution_mode) {
       default_mode_config->streams.push_back(stream);
     }
-    if (stream.used_in_max_resolution_mode) {
+    if (stream.intended_for_max_resolution_mode) {
       max_resolution_mode_config->streams.push_back(stream);
     }
   }
