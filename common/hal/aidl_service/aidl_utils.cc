@@ -1033,9 +1033,9 @@ status_t ConvertToHalStream(const Stream& aidl_stream,
   hal_stream->buffer_size = aidl_stream.bufferSize;
   hal_stream->group_id = aidl_stream.groupId;
 
-  hal_stream->used_in_max_resolution_mode = sensorPixelModeContains(
+  hal_stream->intended_for_max_resolution_mode = sensorPixelModeContains(
       aidl_stream, ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION);
-  hal_stream->used_in_default_resolution_mode =
+  hal_stream->intended_for_default_resolution_mode =
       aidl_stream.sensorPixelModesUsed.size() > 0
           ? sensorPixelModeContains(aidl_stream,
                                     ANDROID_SENSOR_PIXEL_MODE_DEFAULT)

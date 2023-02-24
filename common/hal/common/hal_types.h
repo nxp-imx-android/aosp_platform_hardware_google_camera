@@ -127,8 +127,8 @@ struct Stream {
   uint32_t physical_camera_id = 0;
   uint32_t buffer_size = 0;
   int32_t group_id = -1;
-  bool used_in_max_resolution_mode = false;
-  bool used_in_default_resolution_mode = true;
+  bool intended_for_max_resolution_mode = false;
+  bool intended_for_default_resolution_mode = true;
   DynamicRangeProfile dynamic_profile =
       ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD;
   StreamUseCase use_case = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT;
