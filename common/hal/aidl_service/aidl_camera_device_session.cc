@@ -608,8 +608,12 @@ ScopedAStatus AidlCameraDeviceSession::configureStreams(
   num_pending_first_frame_buffers_ = 0;
 
   google_camera_hal::StreamConfiguration hal_stream_config;
-  status_t res = aidl_utils::ConvertToHalStreamConfig(requestedConfiguration,
-                                                      &hal_stream_config);
+  StreamConfiguration requestedConfigurationOverriddenSensorPixelModes =
+      requestedConfiguration;
+  aidl_utils::FixSensorPixelModesInStreamConfig(
+      &requestedConfigurationOverriddenSensorPixelModes);
+  status_t res = aidl_utils::ConvertToHalStreamConfig(
+      requestedConfigurationOverriddenSensorPixelModes, &hal_stream_config);
   if (res != OK) {
     return ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
