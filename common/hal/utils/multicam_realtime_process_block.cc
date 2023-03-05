@@ -111,9 +111,8 @@ status_t MultiCameraRtProcessBlock::GetCameraStreamConfigurationMap(
   // Create one stream configuration for each camera.
   camera_stream_config_map->clear();
   for (auto& stream : stream_config.streams) {
-    if (stream.stream_type != StreamType::kOutput ||
-        !stream.is_physical_camera_stream) {
-      ALOGE("%s: Only physical output streams are supported.", __FUNCTION__);
+    if (!stream.is_physical_camera_stream) {
+      ALOGE("%s: Only physical streams are supported.", __FUNCTION__);
       return BAD_VALUE;
     }
 
@@ -271,11 +270,6 @@ bool MultiCameraRtProcessBlock::AreRequestsValidLocked(
   std::unordered_set<int32_t> request_camera_ids;
   uint32_t frame_number = block_requests[0].request.frame_number;
   for (auto& block_request : block_requests) {
-    if (!block_request.request.input_buffers.empty()) {
-      ALOGE("%s: Input buffers are not supported.", __FUNCTION__);
-      return false;
-    }
-
     if (block_request.request.output_buffers.size() == 0) {
       ALOGE("%s: request %u doesn't contain any output streams.", __FUNCTION__,
             block_request.request.frame_number);
