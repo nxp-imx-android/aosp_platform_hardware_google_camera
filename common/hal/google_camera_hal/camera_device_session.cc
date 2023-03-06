@@ -26,9 +26,11 @@
 #include "basic_capture_session.h"
 #include "capture_session_utils.h"
 #include "dual_ir_capture_session.h"
+#include "hal_types.h"
 #include "hal_utils.h"
 #include "hdrplus_capture_session.h"
 #include "rgbird_capture_session.h"
+#include "system/camera_metadata.h"
 #include "vendor_tag_defs.h"
 #include "vendor_tag_types.h"
 #include "vendor_tags.h"
@@ -457,6 +459,21 @@ status_t CameraDeviceSession::Initialize(
   return OK;
 }
 
+status_t GetMaxResDimension(const HalCameraMetadata* characteristics,
+                            Dimension& max_res_dimension) {
+  Rect active_array_maximum_resolution_size;
+  status_t max_res_status = utils::GetSensorActiveArraySize(
+      characteristics, &active_array_maximum_resolution_size,
+      /*maximum_resolution*/ true);
+  if (max_res_status == OK) {
+    max_res_dimension = {active_array_maximum_resolution_size.right -
+                             active_array_maximum_resolution_size.left + 1,
+                         active_array_maximum_resolution_size.bottom -
+                             active_array_maximum_resolution_size.top + 1};
+  }
+  return max_res_status;
+}
+
 void CameraDeviceSession::InitializeZoomRatioMapper(
     HalCameraMetadata* characteristics) {
   if (characteristics == nullptr) {
@@ -466,7 +483,8 @@ void CameraDeviceSession::InitializeZoomRatioMapper(
 
   Rect active_array_size;
   status_t res =
-      utils::GetSensorActiveArraySize(characteristics, &active_array_size);
+      utils::GetSensorActiveArraySize(characteristics, &active_array_size,
+                                      /*maximum_resolution*/ false);
   if (res != OK) {
     ALOGE("%s: Failed to get the active array size: %s(%d)", __FUNCTION__,
           strerror(-res), res);
@@ -478,6 +496,10 @@ void CameraDeviceSession::InitializeZoomRatioMapper(
   params.active_array_dimension = {
       active_array_size.right - active_array_size.left + 1,
       active_array_size.bottom - active_array_size.top + 1};
+
+  // Populate max-res dimension only if the logical camera have max-res resolution
+  (void)GetMaxResDimension(characteristics,
+                           params.active_array_maximum_resolution_dimension);
 
   std::vector<uint32_t> physical_camera_ids =
       device_session_hwl_->GetPhysicalCameraIds();
@@ -493,7 +515,8 @@ void CameraDeviceSession::InitializeZoomRatioMapper(
     }
 
     res = utils::GetSensorActiveArraySize(physical_cam_characteristics.get(),
-                                          &active_array_size);
+                                          &active_array_size,
+                                          /*maximum_resolution*/ false);
     if (res != OK) {
       ALOGE("%s: Failed to get cam: %u, active array size: %s(%d)",
             __FUNCTION__, id, strerror(-res), res);
@@ -504,6 +527,12 @@ void CameraDeviceSession::InitializeZoomRatioMapper(
         active_array_size.bottom - active_array_size.top + 1};
     params.physical_cam_active_array_dimension.emplace(id,
                                                        active_array_dimension);
+    Dimension max_res_dimension;
+    if (GetMaxResDimension(physical_cam_characteristics.get(),
+                           max_res_dimension) == OK) {
+      params.physical_cam_active_array_maximum_resolution_dimension.emplace(
+          id, max_res_dimension);
+    }
   }
 
   res = utils::GetZoomRatioRange(characteristics, &params.zoom_ratio_range);

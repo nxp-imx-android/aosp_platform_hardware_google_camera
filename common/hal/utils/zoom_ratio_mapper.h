@@ -27,7 +27,10 @@ class ZoomRatioMapper {
  public:
   struct InitParams {
     Dimension active_array_dimension;
+    Dimension active_array_maximum_resolution_dimension;
     std::unordered_map<uint32_t, Dimension> physical_cam_active_array_dimension;
+    std::unordered_map<uint32_t, Dimension>
+        physical_cam_active_array_maximum_resolution_dimension;
     ZoomRatioRange zoom_ratio_range;
     std::unique_ptr<ZoomRatioMapperHwl> zoom_ratio_mapper_hwl;
     uint32_t camera_id;
@@ -42,6 +45,10 @@ class ZoomRatioMapper {
   void UpdateCaptureResult(CaptureResult* result);
 
  private:
+  // Gets active array dimension
+  Dimension GetActiveArrayDimension(const HalCameraMetadata& metadata,
+                                    bool is_physical, uint32_t camera_id) const;
+
   // Apply zoom ratio to the capture request or result.
   void ApplyZoomRatio(const Dimension& active_array_dimension,
                       const bool is_request, HalCameraMetadata* metadata);
@@ -67,8 +74,15 @@ class ZoomRatioMapper {
   // Active array dimension of logical camera.
   Dimension active_array_dimension_;
 
+  // Active array maximum resolution dimension of logical camera.
+  Dimension active_array_maximum_resolution_dimension_;
+
   // Active array dimension of physical camera.
   std::unordered_map<uint32_t, Dimension> physical_cam_active_array_dimension_;
+
+  // Active array maximum resolution dimension of physical camera.
+  std::unordered_map<uint32_t, Dimension>
+      physical_cam_active_array_maximum_resolution_dimension_;
 
   // Zoom ratio range.
   ZoomRatioRange zoom_ratio_range_;

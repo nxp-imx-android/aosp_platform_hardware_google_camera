@@ -16,11 +16,13 @@
 
 #define LOG_TAG "GCH_ZoomRatioMapper"
 
+#include "zoom_ratio_mapper.h"
+
 #include <log/log.h>
+
 #include <cmath>
 
 #include "utils.h"
-#include "zoom_ratio_mapper.h"
 
 namespace android {
 namespace google_camera_hal {
@@ -34,6 +36,19 @@ int32_t kRectToConvert[] = {ANDROID_SCALER_CROP_REGION};
 int32_t kResultPointsToConvert[] = {ANDROID_STATISTICS_FACE_LANDMARKS,
                                     ANDROID_STATISTICS_FACE_RECTANGLES};
 
+camera_metadata_enum_android_sensor_pixel_mode GetSensorPixelMode(
+    const HalCameraMetadata& metadata) {
+  camera_metadata_ro_entry sensor_pixel_mode_metadata = {};
+  auto res =
+      metadata.Get(ANDROID_SENSOR_PIXEL_MODE, &sensor_pixel_mode_metadata);
+  if (res == OK && sensor_pixel_mode_metadata.data.u8 != nullptr &&
+      sensor_pixel_mode_metadata.data.u8[0] ==
+          ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION) {
+    return ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION;
+  }
+  return ANDROID_SENSOR_PIXEL_MODE_DEFAULT;
+}
+
 void ZoomRatioMapper::Initialize(InitParams* params) {
   if (params == nullptr) {
     ALOGE("%s: invalid param", __FUNCTION__);
@@ -41,13 +56,66 @@ void ZoomRatioMapper::Initialize(InitParams* params) {
   }
   memcpy(&active_array_dimension_, &params->active_array_dimension,
          sizeof(active_array_dimension_));
+  memcpy(&active_array_maximum_resolution_dimension_,
+         &params->active_array_maximum_resolution_dimension,
+         sizeof(active_array_maximum_resolution_dimension_));
   physical_cam_active_array_dimension_ =
       params->physical_cam_active_array_dimension;
+  physical_cam_active_array_maximum_resolution_dimension_ =
+      params->physical_cam_active_array_maximum_resolution_dimension;
   memcpy(&zoom_ratio_range_, &params->zoom_ratio_range,
          sizeof(zoom_ratio_range_));
   zoom_ratio_mapper_hwl_ = std::move(params->zoom_ratio_mapper_hwl);
   is_zoom_ratio_supported_ = true;
   camera_id_ = params->camera_id;
+}
+
+Dimension ZoomRatioMapper::GetActiveArrayDimension(
+    const HalCameraMetadata& metadata, bool is_physical,
+    uint32_t camera_id) const {
+  Dimension active_array_dimension = active_array_dimension_;
+
+  // Overwrite based on zoom_ratio_mapper_hwl_
+  Dimension override_dimension;
+  if (zoom_ratio_mapper_hwl_ &&
+      zoom_ratio_mapper_hwl_->GetActiveArrayDimensionToBeUsed(
+          camera_id, &metadata, &override_dimension)) {
+    active_array_dimension = override_dimension;
+  }
+
+  // Overwrite based on sensor pixel mode
+  if (is_physical) {
+    if (GetSensorPixelMode(metadata) ==
+        ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION) {
+      auto physical_cam_iter =
+          physical_cam_active_array_maximum_resolution_dimension_.find(
+              camera_id);
+      LOG_ALWAYS_FATAL_IF(
+          physical_cam_iter ==
+              physical_cam_active_array_maximum_resolution_dimension_.end(),
+          "%s: cannot process a max-res request or result on the physical "
+          "camera %d because it does not have max-res dimension",
+          __FUNCTION__, camera_id);
+      return physical_cam_iter->second;
+    } else {
+      auto physical_cam_iter =
+          physical_cam_active_array_dimension_.find(camera_id);
+      LOG_ALWAYS_FATAL_IF(
+          physical_cam_iter == physical_cam_active_array_dimension_.end(),
+          "%s: cannot process a request or result on the physical "
+          "camera %d because it does not have active array dimension",
+          __FUNCTION__, camera_id);
+      return physical_cam_iter->second;
+    }
+  } else {
+    if (GetSensorPixelMode(metadata) ==
+        ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION) {
+      return active_array_maximum_resolution_dimension_;
+    } else {
+      return active_array_dimension;
+    }
+  }
+  return active_array_dimension;
 }
 
 void ZoomRatioMapper::UpdateCaptureRequest(CaptureRequest* request) {
@@ -62,32 +130,15 @@ void ZoomRatioMapper::UpdateCaptureRequest(CaptureRequest* request) {
   }
 
   if (request->settings != nullptr) {
-    Dimension override_dimension;
-    Dimension active_array_dimension_chosen = active_array_dimension_;
-    if (zoom_ratio_mapper_hwl_ &&
-        zoom_ratio_mapper_hwl_->GetActiveArrayDimensionToBeUsed(
-            camera_id_, request->settings.get(), &override_dimension)) {
-      active_array_dimension_chosen = override_dimension;
-    }
-    ApplyZoomRatio(active_array_dimension_chosen, true, request->settings.get());
+    Dimension active_array_dimension = GetActiveArrayDimension(
+        *request->settings, /*is_physical*/ false, camera_id_);
+    ApplyZoomRatio(active_array_dimension, true, request->settings.get());
   }
 
   for (auto& [camera_id, metadata] : request->physical_camera_settings) {
     if (metadata != nullptr) {
-      auto physical_cam_iter =
-          physical_cam_active_array_dimension_.find(camera_id);
-      if (physical_cam_iter == physical_cam_active_array_dimension_.end()) {
-        ALOGE("%s: Physical camera id %d is not found!", __FUNCTION__,
-              camera_id);
-        continue;
-      }
-      Dimension override_dimension;
-      Dimension physical_active_array_dimension = physical_cam_iter->second;
-      if (zoom_ratio_mapper_hwl_ &&
-          zoom_ratio_mapper_hwl_->GetActiveArrayDimensionToBeUsed(
-              camera_id, metadata.get(), &override_dimension)) {
-        physical_active_array_dimension = override_dimension;
-      }
+      Dimension physical_active_array_dimension =
+          GetActiveArrayDimension(*metadata, /*is_physical*/ true, camera_id);
       ApplyZoomRatio(physical_active_array_dimension, true, metadata.get());
     }
   }
@@ -108,33 +159,15 @@ void ZoomRatioMapper::UpdateCaptureResult(CaptureResult* result) {
   }
 
   if (result->result_metadata != nullptr) {
-    Dimension override_dimension;
-    Dimension active_array_dimension_chosen = active_array_dimension_;
-    if (zoom_ratio_mapper_hwl_ &&
-        zoom_ratio_mapper_hwl_->GetActiveArrayDimensionToBeUsed(
-            camera_id_, result->result_metadata.get(), &override_dimension)) {
-      active_array_dimension_chosen = override_dimension;
-    }
-    ApplyZoomRatio(active_array_dimension_chosen, false,
-                   result->result_metadata.get());
+    Dimension active_array_dimension = GetActiveArrayDimension(
+        *result->result_metadata, /*is_physical*/ false, camera_id_);
+    ApplyZoomRatio(active_array_dimension, false, result->result_metadata.get());
   }
 
   for (auto& [camera_id, metadata] : result->physical_metadata) {
     if (metadata != nullptr) {
-      auto physical_cam_iter =
-          physical_cam_active_array_dimension_.find(camera_id);
-      if (physical_cam_iter == physical_cam_active_array_dimension_.end()) {
-        ALOGE("%s: Physical camera id %d is not found!", __FUNCTION__,
-              camera_id);
-        continue;
-      }
-      Dimension override_dimension;
-      Dimension physical_active_array_dimension = physical_cam_iter->second;
-      if (zoom_ratio_mapper_hwl_ &&
-          zoom_ratio_mapper_hwl_->GetActiveArrayDimensionToBeUsed(
-              camera_id, metadata.get(), &override_dimension)) {
-        physical_active_array_dimension = override_dimension;
-      }
+      Dimension physical_active_array_dimension =
+          GetActiveArrayDimension(*metadata, /*is_physical*/ true, camera_id);
       ApplyZoomRatio(physical_active_array_dimension, false, metadata.get());
     }
   }
