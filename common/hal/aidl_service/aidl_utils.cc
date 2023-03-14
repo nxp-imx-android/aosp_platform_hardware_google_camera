@@ -15,11 +15,12 @@
  */
 
 #define LOG_TAG "GCH_AidlUtils"
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #include "aidl_utils.h"
 
 #include <aidlcommonsupport/NativeHandle.h>
 #include <log/log.h>
+#include <system/camera_metadata.h>
 
 #include <regex>
 
@@ -711,10 +712,18 @@ status_t ConvertToHalMetadata(
 
   const camera_metadata_t* metadata = nullptr;
   std::vector<int8_t> metadata_queue_settings;
+  const size_t min_camera_metadata_size =
+      calculate_camera_metadata_size(/*entry_count=*/0, /*data_count=*/0);
 
   if (message_queue_setting_size == 0) {
     // Use the settings in the request.
     if (request_settings.size() != 0) {
+      if (request_settings.size() < min_camera_metadata_size) {
+        ALOGE("%s: The size of request_settings is %zu, which is not valid",
+              __FUNCTION__, request_settings.size());
+        return BAD_VALUE;
+      }
+
       metadata =
           reinterpret_cast<const camera_metadata_t*>(request_settings.data());
     }
@@ -722,6 +731,11 @@ status_t ConvertToHalMetadata(
     // Read the settings from request metadata queue.
     if (request_metadata_queue == nullptr) {
       ALOGE("%s: request_metadata_queue is nullptr", __FUNCTION__);
+      return BAD_VALUE;
+    }
+    if (message_queue_setting_size < min_camera_metadata_size) {
+      ALOGE("%s: invalid message queue setting size: %u", __FUNCTION__,
+            message_queue_setting_size);
       return BAD_VALUE;
     }
 
@@ -740,6 +754,16 @@ status_t ConvertToHalMetadata(
   if (metadata == nullptr) {
     *hal_metadata = nullptr;
     return OK;
+  }
+
+  // Validates the injected metadata structure. This prevents memory access
+  // violation that could be introduced by malformed metadata.
+  // (b/236688120) In general we trust metadata sent from Framework, but this is
+  // to defend an exploit chain that skips Framework's validation.
+  if (validate_camera_metadata_structure(metadata, /*expected_size=*/NULL) !=
+      OK) {
+    ALOGE("%s: Failed to validate the metadata structure", __FUNCTION__);
+    return BAD_VALUE;
   }
 
   *hal_metadata = google_camera_hal::HalCameraMetadata::Clone(metadata);
