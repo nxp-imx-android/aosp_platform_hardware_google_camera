@@ -963,6 +963,7 @@ status_t ConvertToHalStreamConfig(
       aidl_stream_config.streamConfigCounter;
   hal_stream_config->multi_resolution_input_image =
       aidl_stream_config.multiResolutionInputImage;
+  hal_stream_config->log_id = aidl_stream_config.logId;
 
   return OK;
 }
