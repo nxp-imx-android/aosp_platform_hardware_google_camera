@@ -376,21 +376,33 @@ bool IsSessionParameterCompatible(const HalCameraMetadata* old_session,
       int32_t new_min_fps = new_entry.data.i32[0];
       int32_t new_max_fps = new_entry.data.i32[1];
       // Do not reconfigure session if max FPS hasn't changed or in
-      // the special case that AE FPS is throttling [60, 60] to [30, 30]
-      // from GCA side, provided the setprop is enabled
-      uint8_t video_60_to_30fps_thermal_throtlle = 0;
+      // the special case that AE FPS is throttling [60, 60] to [30, 30] or
+      // restored from [30, 30] to [60, 60] from GCA side when session parameter
+      // kVideo60to30FPSThermalThrottle is enabled.
+      uint8_t video_60_to_30fps_thermal_throttle = 0;
       camera_metadata_ro_entry_t video_60_to_30fps_throttle_entry;
       if (new_session->Get(kVideo60to30FPSThermalThrottle,
                            &video_60_to_30fps_throttle_entry) == OK) {
-        video_60_to_30fps_thermal_throtlle =
+        video_60_to_30fps_thermal_throttle =
             video_60_to_30fps_throttle_entry.data.u8[0];
       }
 
-      if (old_max_fps == new_max_fps ||
-          (video_60_to_30fps_thermal_throtlle && (old_min_fps == 60) &&
-           (old_max_fps == 60) && (new_min_fps == 30) && (new_max_fps == 30))) {
-        ALOGI("%s: Ignore fps (%d, %d) to (%d, %d)", __FUNCTION__, old_min_fps,
-              old_max_fps, new_min_fps, new_max_fps);
+      bool ignore_fps_range_diff = false;
+      if (video_60_to_30fps_thermal_throttle) {
+        if (((old_min_fps == 60) && (old_max_fps == 60) &&
+             (new_min_fps == 30) && (new_max_fps == 30)) ||
+            ((old_min_fps == 30) && (old_max_fps == 30) &&
+             (new_min_fps == 60) && (new_max_fps == 60))) {
+          ignore_fps_range_diff = true;
+        }
+      }
+
+      if (old_max_fps == new_max_fps || ignore_fps_range_diff) {
+        ALOGI(
+            "%s: Ignore fps (%d, %d) to (%d, %d). "
+            "video_60_to_30fps_thermal_throttle: %u",
+            __FUNCTION__, old_min_fps, old_max_fps, new_min_fps, new_max_fps,
+            video_60_to_30fps_thermal_throttle);
         continue;
       }
 
