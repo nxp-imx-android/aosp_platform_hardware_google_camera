@@ -217,6 +217,7 @@ bool ZslSnapshotCaptureSession::IsStreamConfigurationSupported(
 
   bool has_eligible_snapshot_stream = false;
   bool has_preview_stream = false;
+  bool has_hdr_preview_stream = false;
   for (const auto& stream : stream_config.streams) {
     if (stream.is_physical_camera_stream) {
       ALOGE("%s: support logical stream only", __FUNCTION__);
@@ -233,6 +234,9 @@ bool ZslSnapshotCaptureSession::IsStreamConfigurationSupported(
       }
     } else if (utils::IsPreviewStream(stream)) {
       has_preview_stream = true;
+      if (utils::IsHdrStream(stream)) {
+        has_hdr_preview_stream = true;
+      }
     } else {
       ALOGE("%s: only support preview + (snapshot and/or YUV) streams",
             __FUNCTION__);
@@ -246,6 +250,11 @@ bool ZslSnapshotCaptureSession::IsStreamConfigurationSupported(
 
   if (!has_preview_stream) {
     ALOGE("%s: no preview stream", __FUNCTION__);
+    return false;
+  }
+  if (has_hdr_preview_stream) {
+    ALOGE("%s: 10-bit HDR preview stream does not support ZSL snapshot",
+          __FUNCTION__);
     return false;
   }
 
