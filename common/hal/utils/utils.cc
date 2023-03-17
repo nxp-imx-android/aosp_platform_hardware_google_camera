@@ -556,6 +556,11 @@ bool IsStreamUseCasesVideoCall(const Stream& stream) {
              : false;
 }
 
+bool IsHdrStream(const Stream& stream) {
+  return stream.dynamic_profile !=
+         ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD;
+}
+
 }  // namespace utils
 }  // namespace google_camera_hal
 }  // namespace android
