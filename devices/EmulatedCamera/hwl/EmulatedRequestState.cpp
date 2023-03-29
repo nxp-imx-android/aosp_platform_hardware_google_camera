@@ -980,12 +980,9 @@ std::unique_ptr<HwlPipelineResult> EmulatedRequestState::InitializeResult(
                                  1);
   }
   if (report_focus_range_) {
-    float focus_range[2] = {0.f};
-    if (minimum_focus_distance_ > .0f) {
-      focus_range[0] = 1 / minimum_focus_distance_;
-    }
-    result->result_metadata->Set(ANDROID_LENS_FOCUS_RANGE, focus_range,
-                                 ARRAY_SIZE(focus_range));
+    float focus_range[2] = {};
+    focus_range[0] = focus_distance_;
+    result->result_metadata->Set(ANDROID_LENS_FOCUS_RANGE, focus_range, ARRAY_SIZE(focus_range));
   }
   if (report_filter_density_) {
     result->result_metadata->Set(ANDROID_LENS_FILTER_DENSITY, &filter_density_,
