@@ -22,11 +22,14 @@ package {
 cc_library_headers {
     name: "libgooglecamerahal_headers",
     vendor: true,
+    host_supported: true,
     export_include_dirs: [
         "common",
         "hwl_interface",
         "utils",
     ],
+    shared_libs: ["libcamera_metadata"],
+    export_shared_lib_headers: ["libcamera_metadata"],
 }
 
 cc_defaults {
