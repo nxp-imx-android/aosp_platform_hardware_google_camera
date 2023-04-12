@@ -151,6 +151,7 @@ struct StreamConfiguration {
   std::unique_ptr<HalCameraMetadata> session_params;
   uint32_t stream_config_counter = 0;
   bool multi_resolution_input_image = false;
+  long log_id = 0;
 };
 
 struct CameraIdAndStreamConfiguration {
