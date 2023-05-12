@@ -45,6 +45,9 @@ using google_camera_hal::RequestTemplate;
 using google_camera_hal::StreamBuffer;
 
 struct PendingRequest {
+  uint32_t frame_number;
+  uint32_t pipeline_id;
+  HwlPipelineCallback callback;
   std::unique_ptr<HalCameraMetadata> settings;
   std::unique_ptr<Buffers> input_buffers;
   std::unique_ptr<Buffers> output_buffers;
