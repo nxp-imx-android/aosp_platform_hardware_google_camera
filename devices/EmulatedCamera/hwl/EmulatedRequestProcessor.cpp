@@ -138,7 +138,10 @@ status_t EmulatedRequestProcessor::ProcessPipelineRequests(
           {.settings = nullptr, .frame_number = frame_number});
     }
     pending_requests_.push(
-        {.settings = HalCameraMetadata::Clone(request.settings.get()),
+        {.frame_number = frame_number,
+         .pipeline_id = request.pipeline_id,
+         .callback = pipelines[request.pipeline_id].cb,
+         .settings = HalCameraMetadata::Clone(request.settings.get()),
          .input_buffers = std::move(input_buffers),
          .output_buffers = std::move(output_buffers)});
   }
@@ -189,7 +192,7 @@ std::unique_ptr<Buffers> EmulatedRequestProcessor::CreateSensorBuffers(
     if (session_callback_.return_stream_buffers != nullptr) {
       session_callback_.return_stream_buffers(requested_buffers);
     }
-    return nullptr;
+    requested_buffers.clear();
   }
 
   auto sensor_buffers = std::make_unique<Buffers>();
@@ -207,21 +210,20 @@ std::unique_ptr<Buffers> EmulatedRequestProcessor::CreateSensorBuffers(
 }
 
 void EmulatedRequestProcessor::NotifyFailedRequest(const PendingRequest& request) {
-  if (request.output_buffers->at(0)->callback.notify != nullptr) {
+  if (request.output_buffers != nullptr) {
     // Mark all output buffers for this request in order not to send
     // ERROR_BUFFER for them.
     for (auto& output_buffer : *(request.output_buffers)) {
       output_buffer->is_failed_request = true;
     }
-
-    auto output_buffer = std::move(request.output_buffers->at(0));
-    NotifyMessage msg = {
-        .type = MessageType::kError,
-        .message.error = {.frame_number = output_buffer->frame_number,
-                          .error_stream_id = -1,
-                          .error_code = ErrorCode::kErrorRequest}};
-    output_buffer->callback.notify(output_buffer->pipeline_id, msg);
   }
+
+  NotifyMessage msg = {
+      .type = MessageType::kError,
+      .message.error = {.frame_number = request.frame_number,
+                        .error_stream_id = -1,
+                        .error_code = ErrorCode::kErrorRequest}};
+  request.callback.notify(request.pipeline_id, msg);
 }
 
 status_t EmulatedRequestProcessor::Flush() {
@@ -391,7 +393,7 @@ std::unique_ptr<SensorBuffer> EmulatedRequestProcessor::CreateSensorBuffer(
     auto ret = LockSensorBuffer(stream, buffer->stream_buffer.buffer,
                                 buffer->width, buffer->height, buffer.get());
     if (ret != OK) {
-      buffer.release();
+      buffer->is_failed_request = true;
       buffer = nullptr;
     }
   }
@@ -401,7 +403,7 @@ std::unique_ptr<SensorBuffer> EmulatedRequestProcessor::CreateSensorBuffer(
                                                buffer->acquire_fence_fd);
     if (!fence_status) {
       ALOGE("%s: Failed importing acquire fence!", __FUNCTION__);
-      buffer.release();
+      buffer->is_failed_request = true;
       buffer = nullptr;
     }
   }
@@ -449,13 +451,13 @@ void EmulatedRequestProcessor::RequestProcessorLoop() {
       if (!pending_requests_.empty()) {
         status_t ret;
         const auto& request = pending_requests_.front();
-        auto frame_number = request.output_buffers->at(0)->frame_number;
-        auto notify_callback = request.output_buffers->at(0)->callback;
-        auto pipeline_id = request.output_buffers->at(0)->pipeline_id;
+        auto frame_number = request.frame_number;
+        auto notify_callback = request.callback;
+        auto pipeline_id = request.pipeline_id;
 
         auto output_buffers = AcquireBuffers(request.output_buffers.get());
         auto input_buffers = AcquireBuffers(request.input_buffers.get());
-        if (!output_buffers->empty()) {
+        if ((output_buffers != nullptr) && !output_buffers->empty()) {
           std::unique_ptr<EmulatedSensor::LogicalCameraSettings> logical_settings =
               std::make_unique<EmulatedSensor::LogicalCameraSettings>();
 
