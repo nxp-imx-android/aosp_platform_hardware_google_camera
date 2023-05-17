@@ -122,7 +122,7 @@ cc_defaults {
 }
 
 cc_defaults {
-    name: "camera_service_defaults",
+    name: "hardware_camera_service_defaults",
     defaults: [
         "camera_service_defaults_common",
     ],
@@ -135,7 +135,7 @@ cc_defaults {
 cc_binary {
     name: "android.hardware.camera.provider@2.7-service-google",
     defaults: [
-        "camera_service_defaults",
+        "hardware_camera_service_defaults",
         "camera_service_eager_hal_defaults",
     ],
     init_rc: ["android.hardware.camera.provider@2.7-service-google.rc"],
@@ -144,7 +144,7 @@ cc_binary {
 cc_binary {
     name: "android.hardware.camera.provider@2.7-service-google-lazy",
     defaults: [
-        "camera_service_defaults",
+        "hardware_camera_service_defaults",
         "camera_service_lazy_hal_defaults",
     ],
     init_rc: ["android.hardware.camera.provider@2.7-service-google-lazy.rc"],
