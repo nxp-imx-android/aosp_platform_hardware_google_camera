@@ -46,6 +46,10 @@ struct HwlPipelineRequest {
 
   std::vector<StreamBuffer> output_buffers;
 
+  // Maps from physical camera ID to physical camera settings.
+  std::unordered_map<uint32_t, std::unique_ptr<HalCameraMetadata>>
+      physical_camera_settings;
+
   int32_t input_width;
   int32_t input_height;
 };

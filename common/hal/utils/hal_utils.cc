@@ -50,6 +50,11 @@ status_t CreateHwlPipelineRequest(HwlPipelineRequest* hwl_request,
         HalCameraMetadata::Clone(metadata.get()));
   }
 
+  for (auto& [camera_id, physical_metadata] : request.physical_camera_settings) {
+    hwl_request->physical_camera_settings.emplace(
+        camera_id, HalCameraMetadata::Clone(physical_metadata.get()));
+  }
+
   return OK;
 }
 
