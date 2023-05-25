@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #include "hal_types.h"
 #define LOG_TAG "GCH_RealtimeZslResultProcessor"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
@@ -260,6 +260,12 @@ void RealtimeZslResultProcessor::Notify(
   const NotifyMessage& message = block_message.message;
   if (notify_ == nullptr) {
     ALOGE("%s: notify_ is nullptr. Dropping a message.", __FUNCTION__);
+    return;
+  }
+
+  // Do not notify errors for internal streams
+  if (message.type == MessageType::kError &&
+      message.message.error.error_stream_id == stream_id_) {
     return;
   }
 

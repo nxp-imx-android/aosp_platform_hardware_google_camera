@@ -351,6 +351,13 @@ void RealtimeZslResultRequestProcessor::Notify(
           message.message.shutter.timestamp_ns,
           message.message.shutter.readout_timestamp_ns);
   }
+
+  // Do not notify errors for internal streams
+  if (message.type == MessageType::kError &&
+      message.message.error.error_stream_id == stream_id_) {
+    return;
+  }
+
   notify_(message);
 }
 
