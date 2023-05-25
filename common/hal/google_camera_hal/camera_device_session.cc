@@ -1183,7 +1183,8 @@ status_t CameraDeviceSession::HandleInactiveStreams(const CaptureRequest& reques
     status_t res = stream_buffer_cache_manager_->IsStreamActive(
         stream_buffer.stream_id, &is_active);
     if (res != OK) {
-      ALOGE("%s: Failed to check if stream is active.", __FUNCTION__);
+      ALOGE("%s: Failed to check if stream is active, error status: %s(%d)",
+            __FUNCTION__, strerror(-res), res);
       return UNKNOWN_ERROR;
     }
     if (!is_active) {
@@ -1749,8 +1750,10 @@ status_t CameraDeviceSession::RegisterStreamsIntoCacheManagerLocked(
 
     status_t res = stream_buffer_cache_manager_->RegisterStream(reg_info);
     if (res != OK) {
-      ALOGE("%s: Failed to register stream into stream buffer cache manager.",
-            __FUNCTION__);
+      ALOGE(
+          "%s: Failed to register stream into stream buffer cache manager, "
+          "error status: %s(%d)",
+          __FUNCTION__, strerror(-res), res);
       return UNKNOWN_ERROR;
     }
     ALOGI("%s: [sbc] Registered stream %d into SBC manager.", __FUNCTION__,
@@ -1777,7 +1780,10 @@ status_t CameraDeviceSession::RequestBuffersFromStreamBufferCacheManager(
   status_t res = this->stream_buffer_cache_manager_->GetStreamBuffer(
       stream_id, &buffer_request_result);
   if (res != OK) {
-    ALOGE("%s: Failed to get stream buffer from SBC manager.", __FUNCTION__);
+    ALOGE(
+        "%s: Failed to get stream buffer from SBC manager, error status: "
+        "%s(%d).",
+        __FUNCTION__, strerror(-res), res);
     return UNKNOWN_ERROR;
   }
 
@@ -1881,8 +1887,8 @@ status_t CameraDeviceSession::RequestStreamBuffers(
   if (status != BufferRequestStatus::kOk || buffer_returns.size() != 1) {
     ALOGW(
         "%s: Requesting stream buffer failed. (buffer_returns has %zu "
-        "entries)",
-        __FUNCTION__, buffer_returns.size());
+        "entries; status is %s(%d)).",
+        __FUNCTION__, buffer_returns.size(), strerror(-res), status);
     for (auto& buffer_return : buffer_returns) {
       ALOGI("%s: stream %d, buffer request error %d", __FUNCTION__,
             buffer_return.stream_id, buffer_return.val.error);
