@@ -386,9 +386,10 @@ struct BufferReturn {
 // ::android::hardware::camera::provider::V2_5::DeviceState
 enum class DeviceState : uint64_t {
   kNormal = 0ull,
-  kBackCovered = 1ull,
-  kFrontCovered = 2ull,
-  kFolded = 4ull
+  kBackCovered = 1 << 0,
+  kFrontCovered = 1 << 1,
+  kFolded = 1 << 2,
+  kMaxDeviceState = 1 << 3  // for data validation
 };
 
 // Callback function invoked to process capture results.
