@@ -36,9 +36,8 @@ cc_library_static {
     host_supported: true,
 }
 
-cc_library_shared {
-    name:
-      "lib_profiler",
+cc_defaults {
+    name: "lib_profiler_defaults",
 
     srcs: [
         "profiler.cc",
@@ -70,4 +69,17 @@ cc_library_shared {
     vendor: true,
     host_supported: true,
     rtti: true,
+}
+
+cc_library_shared {
+    name: "lib_profiler",
+    defaults: ["lib_profiler_defaults"],
+}
+
+cc_test_library {
+    name: "lib_profiler_for_test",
+    defaults: ["lib_profiler_defaults"],
+    shared: {
+        enabled: false,
+    },
 }
