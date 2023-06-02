@@ -119,6 +119,7 @@ status_t SnapshotRequestProcessor::ConfigureStreams(
       HalCameraMetadata::Clone(stream_config.session_params.get());
   process_block_stream_config->stream_config_counter =
       stream_config.stream_config_counter;
+  process_block_stream_config->log_id = stream_config.log_id;
 
   return OK;
 }

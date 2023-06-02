@@ -73,6 +73,7 @@ status_t DualIrRequestProcessor::ConfigureStreams(
       HalCameraMetadata::Clone(stream_config.session_params.get());
   process_block_stream_config->stream_config_counter =
       stream_config.stream_config_counter;
+  process_block_stream_config->log_id = stream_config.log_id;
 
   for (auto& stream : process_block_stream_config->streams) {
     // Assign all logical streams to the lead camera.
