@@ -728,6 +728,15 @@ status_t ConvertToHalMetadata(
 
       metadata =
           reinterpret_cast<const camera_metadata_t*>(request_settings.data());
+
+      size_t metadata_size = get_camera_metadata_size(metadata);
+      if (metadata_size != request_settings.size()) {
+        ALOGE(
+            "%s: Mismatch between camera metadata size (%zu) and request "
+            "setting size (%zu)",
+            __FUNCTION__, metadata_size, request_settings.size());
+        return BAD_VALUE;
+      }
     }
   } else {
     // Read the settings from request metadata queue.
@@ -751,6 +760,15 @@ status_t ConvertToHalMetadata(
 
     metadata = reinterpret_cast<const camera_metadata_t*>(
         metadata_queue_settings.data());
+
+    size_t metadata_size = get_camera_metadata_size(metadata);
+    if (metadata_size != message_queue_setting_size) {
+      ALOGE(
+          "%s: Mismatch between camera metadata size (%zu) and message "
+          "queue setting size (%u)",
+          __FUNCTION__, metadata_size, message_queue_setting_size);
+      return BAD_VALUE;
+    }
   }
 
   if (metadata == nullptr) {
