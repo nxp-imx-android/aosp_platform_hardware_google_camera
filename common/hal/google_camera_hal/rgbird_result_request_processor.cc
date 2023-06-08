@@ -754,6 +754,7 @@ status_t RgbirdResultRequestProcessor::ConfigureStreams(
     process_block_stream_config->stream_config_counter =
         stream_config.stream_config_counter;
   }
+  process_block_stream_config->log_id = stream_config.log_id;
 
   return OK;
 }
