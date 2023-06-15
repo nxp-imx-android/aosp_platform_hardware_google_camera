@@ -407,13 +407,16 @@ void RealtimeZslResultRequestProcessor::ReturnResultDirectlyForFramesWithErrorsL
   // the callback directly. Otherwise wait until the missing pieces arrive.
   CombineErrorAndPendingEntriesToResult(error_entry, pending_request, result);
 
+  const bool has_returned_output_to_internal_stream_manager =
+      pending_request.has_returned_output_to_internal_stream_manager;
+
   if (AllDataCollected(error_entry)) {
     pending_error_frames_.erase(result->frame_number);
     pending_frame_number_to_requests_.erase(result->frame_number);
   }
 
   // Don't send result to framework if only internal raw callback
-  if (pending_request.has_returned_output_to_internal_stream_manager &&
+  if (has_returned_output_to_internal_stream_manager &&
       result->result_metadata == nullptr && result->output_buffers.size() == 0) {
     return;
   }
