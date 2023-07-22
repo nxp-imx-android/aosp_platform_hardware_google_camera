@@ -16,7 +16,7 @@
 
 #define LOG_TAG "GCH_AidlCameraDeviceSession"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #include "aidl_camera_device_session.h"
 
 #include <aidl/android/hardware/thermal/IThermal.h>
@@ -26,7 +26,6 @@
 #include <cutils/trace.h>
 #include <log/log.h>
 #include <malloc.h>
-#include <thermalutils/ThermalHidlWrapper.h>
 #include <utils/Trace.h>
 
 #include "aidl_profiler.h"
@@ -39,20 +38,28 @@ namespace implementation {
 
 namespace aidl_utils = ::android::hardware::camera::implementation::aidl_utils;
 
-using aidl::android::hardware::camera::common::Status;
-using aidl::android::hardware::camera::device::BufferRequest;
-using aidl::android::hardware::camera::device::BufferRequestStatus;
-using aidl::android::hardware::camera::device::CaptureResult;
-using aidl::android::hardware::camera::device::HalStream;
-using aidl::android::hardware::camera::device::NotifyMsg;
-using aidl::android::hardware::camera::device::StreamBuffer;
-using aidl::android::hardware::camera::device::StreamBufferRet;
-using aidl::android::hardware::camera::device::StreamBuffersVal;
-using aidl_utils::ConvertToAidlReturn;
-using ::android::hardware::thermal::V1_0::ThermalStatus;
-using ::android::hardware::thermal::V1_0::ThermalStatusCode;
-using ::android::hardware::thermal::V2_0::Temperature;
-using ::android::hardware::thermal::V2_0::TemperatureType;
+using ::aidl::android::hardware::camera::common::Status;
+using ::aidl::android::hardware::camera::device::BufferCache;
+using ::aidl::android::hardware::camera::device::BufferRequest;
+using ::aidl::android::hardware::camera::device::BufferRequestStatus;
+using ::aidl::android::hardware::camera::device::CameraMetadata;
+using ::aidl::android::hardware::camera::device::CameraOfflineSessionInfo;
+using ::aidl::android::hardware::camera::device::CaptureRequest;
+using ::aidl::android::hardware::camera::device::CaptureResult;
+using ::aidl::android::hardware::camera::device::HalStream;
+using ::aidl::android::hardware::camera::device::ICameraDeviceCallback;
+using ::aidl::android::hardware::camera::device::ICameraDeviceSession;
+using ::aidl::android::hardware::camera::device::ICameraOfflineSession;
+using ::aidl::android::hardware::camera::device::NotifyMsg;
+using ::aidl::android::hardware::camera::device::RequestTemplate;
+using ::aidl::android::hardware::camera::device::StreamBuffer;
+using ::aidl::android::hardware::camera::device::StreamBufferRet;
+using ::aidl::android::hardware::camera::device::StreamBuffersVal;
+using ::aidl::android::hardware::camera::device::StreamConfiguration;
+using ::aidl::android::hardware::thermal::Temperature;
+using ::aidl::android::hardware::thermal::TemperatureType;
+using ::android::hardware::camera::implementation::AidlProfiler;
+using ::android::hardware::camera::implementation::aidl_utils::ConvertToAidlReturn;
 
 std::shared_ptr<AidlCameraDeviceSession> AidlCameraDeviceSession::Create(
     const std::shared_ptr<ICameraDeviceCallback>& callback,
@@ -389,29 +396,17 @@ status_t AidlCameraDeviceSession::Initialize(
   }
 
   const std::string thermal_instance_name =
-      std::string(::aidl::android::hardware::thermal::IThermal::descriptor) +
+      std::string(aidl::android::hardware::thermal::IThermal::descriptor) +
       "/default";
   if (AServiceManager_isDeclared(thermal_instance_name.c_str())) {
-    auto thermal_aidl_service =
-        ::aidl::android::hardware::thermal::IThermal::fromBinder(ndk::SpAIBinder(
+    auto thermal_ =
+        aidl::android::hardware::thermal::IThermal::fromBinder(ndk::SpAIBinder(
             AServiceManager_waitForService(thermal_instance_name.c_str())));
-    if (thermal_aidl_service) {
-      thermal_ =
-          sp<::aidl::android::hardware::thermal::ThermalHidlWrapper>::make(
-              thermal_aidl_service);
-    } else {
-      ALOGW("Unable to get Thermal AIDL service; trying Thermal HIDL service");
+    if (!thermal_) {
+      ALOGW("Unable to get Thermal AIDL service");
     }
   } else {
-    ALOGW("Thermal AIDL service is not declared; trying Thermal HIDL service");
-  }
-
-  if (!thermal_) {
-    thermal_ = android::hardware::thermal::V2_0::IThermal::getService();
-  }
-  if (thermal_ == nullptr) {
-    ALOGE("%s: Getting thermal failed.", __FUNCTION__);
-    // Continue without getting thermal information.
+    ALOGW("Thermal AIDL service is not declared");
   }
 
   aidl_device_callback_ = callback;
@@ -465,7 +460,7 @@ void AidlCameraDeviceSession::SetSessionCallbacks() {
 status_t AidlCameraDeviceSession::RegisterThermalChangedCallback(
     google_camera_hal::NotifyThrottlingFunc notify_throttling, bool filter_type,
     google_camera_hal::TemperatureType type) {
-  std::lock_guard<std::mutex> lock(hidl_thermal_mutex_);
+  std::lock_guard<std::mutex> lock(aidl_thermal_mutex_);
   if (thermal_ == nullptr) {
     ALOGE("%s: thermal was not initialized.", __FUNCTION__);
     return NO_INIT;
@@ -476,24 +471,31 @@ status_t AidlCameraDeviceSession::RegisterThermalChangedCallback(
     return ALREADY_EXISTS;
   }
 
-  TemperatureType hidl_type;
-  status_t res =
-      hidl_thermal_utils::ConvertToHidlTemperatureType(type, &hidl_type);
-  if (res != OK) {
-    ALOGE("%s: Converting to HIDL type failed: %s(%d)", __FUNCTION__,
-          strerror(-res), res);
-    return res;
+  TemperatureType aidl_type = TemperatureType::UNKNOWN;
+  if (filter_type) {
+    status_t res =
+        aidl_thermal_utils::ConvertToAidlTemperatureType(type, &aidl_type);
+    if (res != OK) {
+      ALOGE("%s: Converting to AIDL type failed: %s(%d)", __FUNCTION__,
+            strerror(-res), res);
+      return res;
+    }
   }
 
-  std::unique_ptr<hidl_thermal_utils::HidlThermalChangedCallback> callback =
-      hidl_thermal_utils::HidlThermalChangedCallback::Create(notify_throttling);
-  thermal_changed_callback_ = callback.release();
-  ThermalStatus thermal_status;
-  auto hidl_res = thermal_->registerThermalChangedCallback(
-      thermal_changed_callback_, filter_type, hidl_type,
-      [&](ThermalStatus status) { thermal_status = status; });
-  if (!hidl_res.isOk() || thermal_status.code != ThermalStatusCode::SUCCESS) {
+  thermal_changed_callback_ =
+      ndk::SharedRefBase::make<aidl_thermal_utils::ThermalChangedCallback>(
+          notify_throttling);
+  ndk::ScopedAStatus status;
+  if (filter_type) {
+    status = thermal_->registerThermalChangedCallbackWithType(
+        thermal_changed_callback_, aidl_type);
+  } else {
+    status = thermal_->registerThermalChangedCallback(thermal_changed_callback_);
+  }
+  if (!status.isOk()) {
     thermal_changed_callback_ = nullptr;
+    ALOGE("%s: Error when registering thermal changed callback: %s",
+          __FUNCTION__, status.getMessage());
     return UNKNOWN_ERROR;
   }
 
@@ -501,7 +503,7 @@ status_t AidlCameraDeviceSession::RegisterThermalChangedCallback(
 }
 
 void AidlCameraDeviceSession::UnregisterThermalChangedCallback() {
-  std::lock_guard<std::mutex> lock(hidl_thermal_mutex_);
+  std::lock_guard<std::mutex> lock(aidl_thermal_mutex_);
   if (thermal_changed_callback_ == nullptr) {
     // no-op if no thermal changed callback is registered.
     return;
@@ -512,13 +514,11 @@ void AidlCameraDeviceSession::UnregisterThermalChangedCallback() {
     return;
   }
 
-  ThermalStatus thermal_status;
-  auto hidl_res = thermal_->unregisterThermalChangedCallback(
-      thermal_changed_callback_,
-      [&](ThermalStatus status) { thermal_status = status; });
-  if (!hidl_res.isOk() || thermal_status.code != ThermalStatusCode::SUCCESS) {
+  auto status =
+      thermal_->unregisterThermalChangedCallback(thermal_changed_callback_);
+  if (!status.isOk()) {
     ALOGW("%s: Unregstering thermal callback failed: %s", __FUNCTION__,
-          thermal_status.debugMessage.c_str());
+          status.getMessage());
   }
 
   thermal_changed_callback_ = nullptr;
@@ -551,23 +551,23 @@ status_t AidlCameraDeviceSession::CreateMetadataQueue(
   return OK;
 }
 
-ScopedAStatus AidlCameraDeviceSession::constructDefaultRequestSettings(
+ndk::ScopedAStatus AidlCameraDeviceSession::constructDefaultRequestSettings(
     RequestTemplate type, CameraMetadata* aidl_return) {
   ATRACE_NAME("AidlCameraDeviceSession::constructDefaultRequestSettings");
   if (aidl_return == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
   aidl_return->metadata.clear();
   if (device_session_ == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
   google_camera_hal::RequestTemplate hal_type;
   status_t res = aidl_utils::ConvertToHalTemplateType(type, &hal_type);
   if (res != OK) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
 
@@ -580,20 +580,20 @@ ScopedAStatus AidlCameraDeviceSession::constructDefaultRequestSettings(
   uint32_t metadata_size = settings->GetCameraMetadataSize();
   uint8_t* settings_p = (uint8_t*)settings->ReleaseCameraMetadata();
   aidl_return->metadata.assign(settings_p, settings_p + metadata_size);
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::configureStreams(
+ndk::ScopedAStatus AidlCameraDeviceSession::configureStreams(
     const StreamConfiguration& requestedConfiguration,
     std::vector<HalStream>* aidl_return) {
   ATRACE_NAME("AidlCameraDeviceSession::configureStreams");
   if (aidl_return == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
   aidl_return->clear();
   if (device_session_ == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
 
@@ -615,7 +615,7 @@ ScopedAStatus AidlCameraDeviceSession::configureStreams(
   status_t res = aidl_utils::ConvertToHalStreamConfig(
       requestedConfigurationOverriddenSensorPixelModes, &hal_stream_config);
   if (res != OK) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
 
@@ -633,28 +633,30 @@ ScopedAStatus AidlCameraDeviceSession::configureStreams(
   if (res != OK) {
     return aidl_utils::ConvertToAidlReturn(res);
   }
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::getCaptureRequestMetadataQueue(
-    ::aidl::android::hardware::common::fmq::MQDescriptor<
-        int8_t, SynchronizedReadWrite>* aidl_return) {
+ndk::ScopedAStatus AidlCameraDeviceSession::getCaptureRequestMetadataQueue(
+    aidl::android::hardware::common::fmq::MQDescriptor<
+        int8_t, aidl::android::hardware::common::fmq::SynchronizedReadWrite>*
+        aidl_return) {
   *aidl_return = request_metadata_queue_->dupeDesc();
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::getCaptureResultMetadataQueue(
-    ::aidl::android::hardware::common::fmq::MQDescriptor<
-        int8_t, SynchronizedReadWrite>* aidl_return) {
+ndk::ScopedAStatus AidlCameraDeviceSession::getCaptureResultMetadataQueue(
+    aidl::android::hardware::common::fmq::MQDescriptor<
+        int8_t, aidl::android::hardware::common::fmq::SynchronizedReadWrite>*
+        aidl_return) {
   *aidl_return = result_metadata_queue_->dupeDesc();
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::processCaptureRequest(
+ndk::ScopedAStatus AidlCameraDeviceSession::processCaptureRequest(
     const std::vector<CaptureRequest>& requests,
     const std::vector<BufferCache>& cachesToRemove, int32_t* aidl_return) {
   if (aidl_return == nullptr || device_session_ == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
   *aidl_return = 0;
@@ -677,7 +679,7 @@ ScopedAStatus AidlCameraDeviceSession::processCaptureRequest(
     if (profile_first_request) {
       ATRACE_END();
     }
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
 
@@ -716,7 +718,7 @@ ScopedAStatus AidlCameraDeviceSession::processCaptureRequest(
   }
   if (num_processed_requests > INT_MAX) {
     cleanupHandles(handles_to_delete);
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
   *aidl_return = (int32_t)num_processed_requests;
@@ -727,17 +729,17 @@ ScopedAStatus AidlCameraDeviceSession::processCaptureRequest(
   return aidl_utils::ConvertToAidlReturn(res);
 }
 
-ScopedAStatus AidlCameraDeviceSession::signalStreamFlush(
+ndk::ScopedAStatus AidlCameraDeviceSession::signalStreamFlush(
     const std::vector<int32_t>&, int32_t) {
   // TODO(b/143902312): Implement this.
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::flush() {
+ndk::ScopedAStatus AidlCameraDeviceSession::flush() {
   ATRACE_NAME("AidlCameraDeviceSession::flush");
   ATRACE_ASYNC_BEGIN("switch_mode", 0);
   if (device_session_ == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
@@ -752,14 +754,14 @@ ScopedAStatus AidlCameraDeviceSession::flush() {
   if (res != OK) {
     ALOGE("%s: Flushing device failed: %s(%d).", __FUNCTION__, strerror(-res),
           res);
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::close() {
+ndk::ScopedAStatus AidlCameraDeviceSession::close() {
   ATRACE_NAME("AidlCameraDeviceSession::close");
   if (device_session_ != nullptr) {
     auto profiler = aidl_profiler_->MakeScopedProfiler(
@@ -770,25 +772,25 @@ ScopedAStatus AidlCameraDeviceSession::close() {
                                      aidl_profiler_->GetFpsFlag()));
     device_session_ = nullptr;
   }
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
-ScopedAStatus AidlCameraDeviceSession::switchToOffline(
+ndk::ScopedAStatus AidlCameraDeviceSession::switchToOffline(
     const std::vector<int32_t>&,
     CameraOfflineSessionInfo* out_offlineSessionInfo,
     std::shared_ptr<ICameraOfflineSession>* aidl_return) {
   *out_offlineSessionInfo = CameraOfflineSessionInfo();
   *aidl_return = nullptr;
-  return ScopedAStatus::fromServiceSpecificError(
+  return ndk::ScopedAStatus::fromServiceSpecificError(
       static_cast<int32_t>(Status::INTERNAL_ERROR));
 }
 
-ScopedAStatus AidlCameraDeviceSession::isReconfigurationRequired(
+ndk::ScopedAStatus AidlCameraDeviceSession::isReconfigurationRequired(
     const CameraMetadata& oldSessionParams,
     const CameraMetadata& newSessionParams, bool* reconfiguration_required) {
   ATRACE_NAME("AidlCameraDeviceSession::isReconfigurationRequired");
   if (reconfiguration_required == nullptr) {
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::ILLEGAL_ARGUMENT));
   }
   *reconfiguration_required = true;
@@ -798,7 +800,7 @@ ScopedAStatus AidlCameraDeviceSession::isReconfigurationRequired(
   if (res != OK) {
     ALOGE("%s: Converting to old session metadata failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
@@ -808,7 +810,7 @@ ScopedAStatus AidlCameraDeviceSession::isReconfigurationRequired(
   if (res != OK) {
     ALOGE("%s: Converting to new session metadata failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
@@ -819,11 +821,11 @@ ScopedAStatus AidlCameraDeviceSession::isReconfigurationRequired(
   if (res != OK) {
     ALOGE("%s: IsReconfigurationRequired failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
-    return ScopedAStatus::fromServiceSpecificError(
+    return ndk::ScopedAStatus::fromServiceSpecificError(
         static_cast<int32_t>(Status::INTERNAL_ERROR));
   }
 
-  return ScopedAStatus::ok();
+  return ndk::ScopedAStatus::ok();
 }
 
 ::ndk::SpAIBinder AidlCameraDeviceSession::createBinder() {

@@ -20,14 +20,16 @@
 #include <aidl/android/hardware/camera/device/BnCameraDeviceSession.h>
 #include <aidl/android/hardware/camera/device/ICameraDevice.h>
 #include <aidl/android/hardware/camera/device/ICameraDeviceCallback.h>
-#include <android/hardware/thermal/2.0/IThermal.h>
+#include <aidl/android/hardware/thermal/IThermal.h>
+#include <android-base/thread_annotations.h>
 #include <fmq/AidlMessageQueue.h>
+#include <utils/StrongPointer.h>
 
 #include <shared_mutex>
 
 #include "aidl_profiler.h"
+#include "aidl_thermal_utils.h"
 #include "camera_device_session.h"
-#include "hidl_thermal_utils.h"
 
 namespace android {
 namespace hardware {
@@ -35,26 +37,11 @@ namespace camera {
 namespace device {
 namespace implementation {
 
-using ::aidl::android::hardware::camera::device::BnCameraDeviceSession;
-using ::aidl::android::hardware::camera::device::BufferCache;
-using ::aidl::android::hardware::camera::device::CameraMetadata;
-using ::aidl::android::hardware::camera::device::CameraOfflineSessionInfo;
-using ::aidl::android::hardware::camera::device::CaptureRequest;
-using ::aidl::android::hardware::camera::device::HalStream;
-using ::aidl::android::hardware::camera::device::ICameraDeviceCallback;
-using ::aidl::android::hardware::camera::device::ICameraOfflineSession;
-using ::aidl::android::hardware::camera::device::RequestTemplate;
-using ::aidl::android::hardware::camera::device::StreamConfiguration;
-using ::aidl::android::hardware::common::fmq::SynchronizedReadWrite;
-using ::android::hardware::camera::implementation::AidlProfiler;
-using ndk::ScopedAStatus;
-
-using MetadataQueue = AidlMessageQueue<int8_t, SynchronizedReadWrite>;
-
 // AidlCameraDeviceSession implements the AIDL camera device session interface,
 // ICameraDeviceSession, that contains the methods to configure and request
 // captures from an active camera device.
-class AidlCameraDeviceSession : public BnCameraDeviceSession {
+class AidlCameraDeviceSession
+    : public aidl::android::hardware::camera::device::BnCameraDeviceSession {
  public:
   // Create a AidlCameraDeviceSession.
   // device_session is a google camera device session that
@@ -62,61 +49,79 @@ class AidlCameraDeviceSession : public BnCameraDeviceSession {
   // AidlCameraDeviceSession will fail if device_session is
   // nullptr.
   static std::shared_ptr<AidlCameraDeviceSession> Create(
-      const std::shared_ptr<ICameraDeviceCallback>& callback,
+      const std::shared_ptr<
+          aidl::android::hardware::camera::device::ICameraDeviceCallback>& callback,
       std::unique_ptr<google_camera_hal::CameraDeviceSession> device_session,
-      std::shared_ptr<AidlProfiler> aidl_profiler);
+      std::shared_ptr<android::hardware::camera::implementation::AidlProfiler>
+          aidl_profiler);
 
   virtual ~AidlCameraDeviceSession();
 
   // functions in ICameraDeviceSession
 
-  ScopedAStatus close() override;
+  ndk::ScopedAStatus close() override;
 
-  ScopedAStatus configureStreams(const StreamConfiguration&,
-                                 std::vector<HalStream>*) override;
+  ndk::ScopedAStatus configureStreams(
+      const aidl::android::hardware::camera::device::StreamConfiguration&,
+      std::vector<aidl::android::hardware::camera::device::HalStream>*) override;
 
-  ScopedAStatus constructDefaultRequestSettings(
-      RequestTemplate in_type, CameraMetadata* _aidl_return) override;
+  ndk::ScopedAStatus constructDefaultRequestSettings(
+      aidl::android::hardware::camera::device::RequestTemplate in_type,
+      aidl::android::hardware::camera::device::CameraMetadata* aidl_return)
+      override;
 
-  ScopedAStatus flush() override;
+  ndk::ScopedAStatus flush() override;
 
-  ScopedAStatus getCaptureRequestMetadataQueue(
-      ::aidl::android::hardware::common::fmq::MQDescriptor<
-          int8_t, SynchronizedReadWrite>* _aidl_return) override;
+  ndk::ScopedAStatus getCaptureRequestMetadataQueue(
+      aidl::android::hardware::common::fmq::MQDescriptor<
+          int8_t, aidl::android::hardware::common::fmq::SynchronizedReadWrite>*
+          aidl_return) override;
 
-  ScopedAStatus getCaptureResultMetadataQueue(
-      ::aidl::android::hardware::common::fmq::MQDescriptor<
-          int8_t, SynchronizedReadWrite>* _aidl_return) override;
+  ndk::ScopedAStatus getCaptureResultMetadataQueue(
+      aidl::android::hardware::common::fmq::MQDescriptor<
+          int8_t, aidl::android::hardware::common::fmq::SynchronizedReadWrite>*
+          aidl_return) override;
 
-  ScopedAStatus isReconfigurationRequired(
-      const CameraMetadata& in_oldSessionParams,
-      const CameraMetadata& in_newSessionParams, bool* _aidl_return) override;
+  ndk::ScopedAStatus isReconfigurationRequired(
+      const aidl::android::hardware::camera::device::CameraMetadata&
+          in_oldSessionParams,
+      const aidl::android::hardware::camera::device::CameraMetadata&
+          in_newSessionParams,
+      bool* aidl_return) override;
 
-  ScopedAStatus processCaptureRequest(
-      const std::vector<CaptureRequest>& in_requests,
-      const std::vector<BufferCache>& in_cachesToRemove,
-      int32_t* _aidl_return) override;
+  ndk::ScopedAStatus processCaptureRequest(
+      const std::vector<aidl::android::hardware::camera::device::CaptureRequest>&
+          in_requests,
+      const std::vector<aidl::android::hardware::camera::device::BufferCache>&
+          in_cachesToRemove,
+      int32_t* aidl_return) override;
 
-  ScopedAStatus signalStreamFlush(const std::vector<int32_t>& in_streamIds,
-                                  int32_t in_streamConfigCounter) override;
+  ndk::ScopedAStatus signalStreamFlush(const std::vector<int32_t>& in_streamIds,
+                                       int32_t in_streamConfigCounter) override;
 
-  ScopedAStatus switchToOffline(
+  ndk::ScopedAStatus switchToOffline(
       const std::vector<int32_t>& in_streamsToKeep,
-      CameraOfflineSessionInfo* out_offlineSessionInfo,
-      std::shared_ptr<ICameraOfflineSession>* _aidl_return) override;
+      aidl::android::hardware::camera::device::CameraOfflineSessionInfo*
+          out_offlineSessionInfo,
+      std::shared_ptr<
+          aidl::android::hardware::camera::device::ICameraOfflineSession>*
+          aidl_return) override;
 
-  ScopedAStatus repeatingRequestEnd(
+  ndk::ScopedAStatus repeatingRequestEnd(
       int32_t /*in_frameNumber*/,
       const std::vector<int32_t>& /*in_streamIds*/) override {
-    return ScopedAStatus::ok();
+    return ndk::ScopedAStatus::ok();
   };
 
   AidlCameraDeviceSession() = default;
 
  protected:
-  ::ndk::SpAIBinder createBinder() override;
+  ndk::SpAIBinder createBinder() override;
 
  private:
+  using MetadataQueue = AidlMessageQueue<
+      int8_t, aidl::android::hardware::common::fmq::SynchronizedReadWrite>;
+
   static constexpr uint32_t kRequestMetadataQueueSizeBytes = 1 << 20;  // 1MB
   static constexpr uint32_t kResultMetadataQueueSizeBytes = 1 << 20;   // 1MB
 
@@ -125,9 +130,11 @@ class AidlCameraDeviceSession : public BnCameraDeviceSession {
 
   // Initialize AidlCameraDeviceSession with a CameraDeviceSession.
   status_t Initialize(
-      const std::shared_ptr<ICameraDeviceCallback>& callback,
+      const std::shared_ptr<
+          aidl::android::hardware::camera::device::ICameraDeviceCallback>& callback,
       std::unique_ptr<google_camera_hal::CameraDeviceSession> device_session,
-      std::shared_ptr<AidlProfiler> aidl_profiler);
+      std::shared_ptr<android::hardware::camera::implementation::AidlProfiler>
+          aidl_profiler);
 
   // Create a metadata queue.
   // If override_size_property contains a valid size, it will create a metadata
@@ -188,18 +195,19 @@ class AidlCameraDeviceSession : public BnCameraDeviceSession {
   // used to protect member variable writing and reading.
   std::shared_mutex aidl_device_callback_lock_;
   // Protected by aidl_device_callback_lock_
-  std::shared_ptr<ICameraDeviceCallback> aidl_device_callback_;
+  std::shared_ptr<aidl::android::hardware::camera::device::ICameraDeviceCallback>
+      aidl_device_callback_;
 
-  sp<android::hardware::graphics::mapper::V2_0::IMapper> buffer_mapper_v2_;
-  sp<android::hardware::graphics::mapper::V3_0::IMapper> buffer_mapper_v3_;
-  sp<android::hardware::graphics::mapper::V4_0::IMapper> buffer_mapper_v4_;
+  android::sp<android::hardware::graphics::mapper::V2_0::IMapper> buffer_mapper_v2_;
+  android::sp<android::hardware::graphics::mapper::V3_0::IMapper> buffer_mapper_v3_;
+  android::sp<android::hardware::graphics::mapper::V4_0::IMapper> buffer_mapper_v4_;
 
-  std::mutex hidl_thermal_mutex_;
-  sp<android::hardware::thermal::V2_0::IThermal> thermal_;
+  std::mutex aidl_thermal_mutex_;
+  std::shared_ptr<aidl::android::hardware::thermal::IThermal> thermal_;
 
   // Must be protected by hidl_thermal_mutex_.
-  sp<android::hardware::thermal::V2_0::IThermalChangedCallback>
-      thermal_changed_callback_;
+  std::shared_ptr<aidl::android::hardware::thermal::IThermalChangedCallback>
+      thermal_changed_callback_ GUARDED_BY(aidl_thermal_mutex_);
 
   // Flag for profiling first frame processing time.
   bool first_frame_requested_ = false;
@@ -212,7 +220,8 @@ class AidlCameraDeviceSession : public BnCameraDeviceSession {
   // Must be protected by pending_first_frame_buffers_mutex_
   size_t num_pending_first_frame_buffers_ = 0;
 
-  std::shared_ptr<AidlProfiler> aidl_profiler_;
+  std::shared_ptr<android::hardware::camera::implementation::AidlProfiler>
+      aidl_profiler_;
 };
 
 }  // namespace implementation
