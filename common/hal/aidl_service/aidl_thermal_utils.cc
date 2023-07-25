@@ -14,74 +14,69 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "GCH_HidlThermalUtils"
-//#define LOG_NDEBUG 0
-#include "hidl_thermal_utils.h"
+#define LOG_TAG "GCH_AidlThermalUtils"
+// #define LOG_NDEBUG 0
+#include "aidl_thermal_utils.h"
 
 #include <log/log.h>
 
 namespace android {
 namespace hardware {
-namespace hidl_thermal_utils {
+namespace aidl_thermal_utils {
+namespace {
 
-std::unique_ptr<HidlThermalChangedCallback> HidlThermalChangedCallback::Create(
-    google_camera_hal::NotifyThrottlingFunc notify_throttling) {
-  auto thermal_changed_callback = std::unique_ptr<HidlThermalChangedCallback>(
-      new HidlThermalChangedCallback(notify_throttling));
-  if (thermal_changed_callback == nullptr) {
-    ALOGE("%s: Failed to create a thermal changed callback", __FUNCTION__);
-    return nullptr;
-  }
+using ::aidl::android::hardware::thermal::Temperature;
+using ::aidl::android::hardware::thermal::TemperatureType;
+using ::aidl::android::hardware::thermal::ThrottlingSeverity;
 
-  return thermal_changed_callback;
-}
+}  // namespace
 
-HidlThermalChangedCallback::HidlThermalChangedCallback(
+ThermalChangedCallback::ThermalChangedCallback(
     google_camera_hal::NotifyThrottlingFunc notify_throttling)
-    : kNotifyThrottling(notify_throttling) {
+    : notify_throttling_(std::move(notify_throttling)) {
 }
 
-status_t ConvertToHidlTemperatureType(
+status_t ConvertToAidlTemperatureType(
     const google_camera_hal::TemperatureType& hal_temperature_type,
-    TemperatureType* hidl_temperature_type) {
-  if (hidl_temperature_type == nullptr) {
-    ALOGE("%s: hidl_temperature_type is nullptr", __FUNCTION__);
+    TemperatureType* aidl_temperature_type) {
+  if (aidl_temperature_type == nullptr) {
+    ALOGE("%s: aidl_temperature_type is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
   switch (hal_temperature_type) {
     case google_camera_hal::TemperatureType::kUnknown:
-      *hidl_temperature_type = TemperatureType::UNKNOWN;
+      *aidl_temperature_type = TemperatureType::UNKNOWN;
       break;
     case google_camera_hal::TemperatureType::kCpu:
-      *hidl_temperature_type = TemperatureType::CPU;
+      *aidl_temperature_type = TemperatureType::CPU;
       break;
     case google_camera_hal::TemperatureType::kGpu:
-      *hidl_temperature_type = TemperatureType::GPU;
+      *aidl_temperature_type = TemperatureType::GPU;
       break;
     case google_camera_hal::TemperatureType::kBattery:
-      *hidl_temperature_type = TemperatureType::BATTERY;
+      *aidl_temperature_type = TemperatureType::BATTERY;
       break;
     case google_camera_hal::TemperatureType::kSkin:
-      *hidl_temperature_type = TemperatureType::SKIN;
+      *aidl_temperature_type = TemperatureType::SKIN;
       break;
     case google_camera_hal::TemperatureType::kUsbPort:
-      *hidl_temperature_type = TemperatureType::USB_PORT;
+      *aidl_temperature_type = TemperatureType::USB_PORT;
       break;
     case google_camera_hal::TemperatureType::kPowerAmplifier:
-      *hidl_temperature_type = TemperatureType::POWER_AMPLIFIER;
+      *aidl_temperature_type = TemperatureType::POWER_AMPLIFIER;
       break;
     case google_camera_hal::TemperatureType::kBclVoltage:
-      *hidl_temperature_type = TemperatureType::BCL_VOLTAGE;
+      *aidl_temperature_type = TemperatureType::BCL_VOLTAGE;
       break;
     case google_camera_hal::TemperatureType::kBclCurrent:
-      *hidl_temperature_type = TemperatureType::BCL_CURRENT;
+      *aidl_temperature_type = TemperatureType::BCL_CURRENT;
       break;
     case google_camera_hal::TemperatureType::kBclPercentage:
-      *hidl_temperature_type = TemperatureType::BCL_PERCENTAGE;
+      *aidl_temperature_type = TemperatureType::BCL_PERCENTAGE;
       break;
     case google_camera_hal::TemperatureType::kNpu:
-      *hidl_temperature_type = TemperatureType::NPU;
+      *aidl_temperature_type = TemperatureType::NPU;
       break;
     default:
       ALOGE("%s: Unknown temperature type: %d", __FUNCTION__,
@@ -92,15 +87,15 @@ status_t ConvertToHidlTemperatureType(
   return OK;
 }
 
-status_t HidlThermalChangedCallback::ConvertToHalTemperatureType(
-    const TemperatureType& hidl_temperature_type,
+status_t ThermalChangedCallback::ConvertToHalTemperatureType(
+    const TemperatureType& aidl_temperature_type,
     google_camera_hal::TemperatureType* hal_temperature_type) {
   if (hal_temperature_type == nullptr) {
     ALOGE("%s: hal_temperature_type is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_temperature_type) {
+  switch (aidl_temperature_type) {
     case TemperatureType::UNKNOWN:
       *hal_temperature_type = google_camera_hal::TemperatureType::kUnknown;
       break;
@@ -137,22 +132,22 @@ status_t HidlThermalChangedCallback::ConvertToHalTemperatureType(
       break;
     default:
       ALOGE("%s: Unknown temperature type: %d", __FUNCTION__,
-            hidl_temperature_type);
+            aidl_temperature_type);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-status_t HidlThermalChangedCallback::ConvertToHalThrottlingSeverity(
-    const ThrottlingSeverity& hidl_throttling_severity,
+status_t ThermalChangedCallback::ConvertToHalThrottlingSeverity(
+    const ThrottlingSeverity& aidl_throttling_severity,
     google_camera_hal::ThrottlingSeverity* hal_throttling_severity) {
   if (hal_throttling_severity == nullptr) {
     ALOGE("%s: hal_throttling_severity is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  switch (hidl_throttling_severity) {
+  switch (aidl_throttling_severity) {
     case ThrottlingSeverity::NONE:
       *hal_throttling_severity = google_camera_hal::ThrottlingSeverity::kNone;
       break;
@@ -180,22 +175,22 @@ status_t HidlThermalChangedCallback::ConvertToHalThrottlingSeverity(
       break;
     default:
       ALOGE("%s: Unknown temperature severity: %d", __FUNCTION__,
-            hidl_throttling_severity);
+            aidl_throttling_severity);
       return BAD_VALUE;
   }
 
   return OK;
 }
 
-status_t HidlThermalChangedCallback::ConvertToHalTemperature(
-    const Temperature& hidl_temperature,
+status_t ThermalChangedCallback::ConvertToHalTemperature(
+    const Temperature& aidl_temperature,
     google_camera_hal::Temperature* hal_temperature) {
   if (hal_temperature == nullptr) {
     ALOGE("%s: hal_temperature is nullptr", __FUNCTION__);
     return BAD_VALUE;
   }
 
-  status_t res = ConvertToHalTemperatureType(hidl_temperature.type,
+  status_t res = ConvertToHalTemperatureType(aidl_temperature.type,
                                              &hal_temperature->type);
   if (res != OK) {
     ALOGE("%s: Converting to hal temperature type failed: %s(%d)", __FUNCTION__,
@@ -203,10 +198,10 @@ status_t HidlThermalChangedCallback::ConvertToHalTemperature(
     return res;
   }
 
-  hal_temperature->name = hidl_temperature.name;
-  hal_temperature->value = hidl_temperature.value;
+  hal_temperature->name = aidl_temperature.name;
+  hal_temperature->value = aidl_temperature.value;
 
-  res = ConvertToHalThrottlingSeverity(hidl_temperature.throttlingStatus,
+  res = ConvertToHalThrottlingSeverity(aidl_temperature.throttlingStatus,
                                        &hal_temperature->throttling_status);
   if (res != OK) {
     ALOGE("%s: Converting to hal throttling severity type failed: %s(%d)",
@@ -217,20 +212,19 @@ status_t HidlThermalChangedCallback::ConvertToHalTemperature(
   return OK;
 }
 
-Return<void> HidlThermalChangedCallback::notifyThrottling(
+ndk::ScopedAStatus ThermalChangedCallback::notifyThrottling(
     const Temperature& temperature) {
   google_camera_hal::Temperature hal_temperature;
   status_t res = ConvertToHalTemperature(temperature, &hal_temperature);
-  if (res != OK) {
+  if (res == OK) {
+    notify_throttling_(hal_temperature);
+  } else {
     ALOGE("%s: Converting to hal temperature failed: %s(%d)", __FUNCTION__,
           strerror(-res), res);
-    return Void();
   }
-
-  kNotifyThrottling(hal_temperature);
-  return Void();
+  return ndk::ScopedAStatus(AStatus_newOk());
 }
 
-}  // namespace hidl_thermal_utils
+}  // namespace aidl_thermal_utils
 }  // namespace hardware
 }  // namespace android
