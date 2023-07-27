@@ -185,11 +185,6 @@ status_t GetSensorActiveArraySize(const HalCameraMetadata* characteristics,
   camera_metadata_ro_entry entry;
   status_t res = characteristics->Get(active_array_tag, &entry);
   if (res != OK || entry.count != 4) {
-    ALOGE(
-        "%s: Getting ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE failed: %s(%d) "
-        "count: %zu max resolution ? %s",
-        __FUNCTION__, strerror(-res), res, entry.count,
-        maximum_resolution ? "true" : "false");
     return res;
   }
 
