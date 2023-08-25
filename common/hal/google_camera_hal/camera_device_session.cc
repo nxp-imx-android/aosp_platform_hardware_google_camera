@@ -640,6 +640,7 @@ void CameraDeviceSession::SetSessionCallback(
 }
 
 void CameraDeviceSession::NotifyThrottling(const Temperature& temperature) {
+  std::lock_guard lock(session_callback_lock_);
   switch (temperature.throttling_status) {
     case ThrottlingSeverity::kNone:
     case ThrottlingSeverity::kLight:
