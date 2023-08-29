@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #define LOG_TAG "GCH_ResultDispatcher"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
 #include "result_dispatcher.h"
@@ -61,23 +61,16 @@ ResultDispatcher::ResultDispatcher(
   notify_callback_thread_ =
       std::thread([this] { this->NotifyCallbackThreadLoop(); });
 
-  if (utils::SupportRealtimeThread()) {
-    status_t res =
-        utils::SetRealtimeThread(notify_callback_thread_.native_handle());
-    if (res != OK) {
-      ALOGE("[%s] %s: SetRealtimeThread fail", name_.c_str(), __FUNCTION__);
-    } else {
-      ALOGI("[%s] %s: SetRealtimeThread OK", name_.c_str(), __FUNCTION__);
-    }
+  // Assign higher priority to reduce the preemption when CPU usage is high
+  //
+  // As from b/295977499, we need to make it realtime for priority inheritance
+  // to avoid CameraServer thread being the bottleneck
+  status_t res =
+      utils::SetRealtimeThread(notify_callback_thread_.native_handle());
+  if (res != OK) {
+    ALOGE("[%s] %s: SetRealtimeThread fail", name_.c_str(), __FUNCTION__);
   } else {
-    // Assign higher priority to reduce the preemption when CPU usage is high
-    int32_t res = setpriority(
-        PRIO_PROCESS,
-        pthread_gettid_np(notify_callback_thread_.native_handle()), -20);
-    if (res != 0) {
-      ALOGE("[%s] %s: Set thread priority fail with error: %s", name_.c_str(),
-            __FUNCTION__, strerror(errno));
-    }
+    ALOGI("[%s] %s: SetRealtimeThread OK", name_.c_str(), __FUNCTION__);
   }
   InitializeGroupStreamIdsMap(stream_config);
 }
