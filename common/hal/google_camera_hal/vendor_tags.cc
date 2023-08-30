@@ -108,6 +108,9 @@ status_t ModifyCharacteristicsKeys(HalCameraMetadata* metadata) {
   // VendorTagIds::kVideo60to30FPSThermalThrottle
   session_keys.push_back(VendorTagIds::kVideo60to30FPSThermalThrottle);
   request_keys.push_back(VendorTagIds::kVideo60to30FPSThermalThrottle);
+  // VendorTagIds::kVideoFpsThrottle
+  session_keys.push_back(VendorTagIds::kVideoFpsThrottle);
+  request_keys.push_back(VendorTagIds::kVideoFpsThrottle);
 
   // Update the static metadata with the new set of keys
   if (metadata->Set(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS, request_keys.data(),

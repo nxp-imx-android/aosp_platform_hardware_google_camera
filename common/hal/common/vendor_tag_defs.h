@@ -49,6 +49,7 @@ enum VendorTagIds : uint32_t {
   kSwDenoiseEnabled,
   kVideoSwDenoiseEnabled,
   kVideo60to30FPSThermalThrottle,
+  kVideoFpsThrottle,
   // This should not be used as a vendor tag ID on its own, but as a placeholder
   // to indicate the end of currently defined vendor tag IDs
   kEndMarker
@@ -241,6 +242,17 @@ static const std::vector<VendorTag> kInternalVendorTags = {
     // Payload: Video60to30FPSThermalThrottle
     {.tag_id = VendorTagIds::kVideo60to30FPSThermalThrottle,
      .tag_name = "Video60to30FPSThermalThrottle",
+     .tag_type = CameraMetadataType::kByte},
+    // Video Fps Throttle Enabled
+    //
+    // Indicates whether hal should accept changes in
+    // fps range without reconfiguring graph. This allows for
+    // smooth transitions.
+    //
+    // Present in: request and session keys
+    // Payload: VideoFpsThrottle
+    {.tag_id = VendorTagIds::kVideoFpsThrottle,
+     .tag_name = "VideoFpsThrottle",
      .tag_type = CameraMetadataType::kByte},
 };
 
