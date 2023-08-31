@@ -399,7 +399,7 @@ status_t AidlCameraDeviceSession::Initialize(
       std::string(aidl::android::hardware::thermal::IThermal::descriptor) +
       "/default";
   if (AServiceManager_isDeclared(thermal_instance_name.c_str())) {
-    thermal_ =
+    auto thermal_ =
         aidl::android::hardware::thermal::IThermal::fromBinder(ndk::SpAIBinder(
             AServiceManager_waitForService(thermal_instance_name.c_str())));
     if (!thermal_) {
