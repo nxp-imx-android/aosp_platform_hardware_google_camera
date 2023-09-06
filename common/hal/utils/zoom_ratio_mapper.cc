@@ -192,12 +192,14 @@ void ZoomRatioMapper::ApplyZoomRatio(const Dimension& active_array_dimension,
   }
   float zoom_ratio = entry.data.f[0];
 
+  // TODO(b/298643274) Restore the log level to ERROR once the log spew
+  // issue is fixed.
   if (zoom_ratio < zoom_ratio_range_.min) {
-    ALOGE("%s, zoom_ratio(%f) is smaller than lower bound(%f)", __FUNCTION__,
+    ALOGV("%s, zoom_ratio(%f) is smaller than lower bound(%f)", __FUNCTION__,
           zoom_ratio, zoom_ratio_range_.min);
     zoom_ratio = zoom_ratio_range_.min;
   } else if (zoom_ratio > zoom_ratio_range_.max) {
-    ALOGE("%s, zoom_ratio(%f) is larger than upper bound(%f)", __FUNCTION__,
+    ALOGV("%s, zoom_ratio(%f) is larger than upper bound(%f)", __FUNCTION__,
           zoom_ratio, zoom_ratio_range_.max);
     zoom_ratio = zoom_ratio_range_.max;
   }
