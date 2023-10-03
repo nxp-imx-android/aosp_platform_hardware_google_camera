@@ -308,8 +308,8 @@ status_t ConvertToAidlResultMetadata(
   }
 
   uint32_t metadata_size = hal_metadata->GetCameraMetadataSize();
-  uint8_t* metadata_p =
-      reinterpret_cast<uint8_t*>(hal_metadata->ReleaseCameraMetadata());
+  const auto* metadata_p =
+      reinterpret_cast<const uint8_t*>(hal_metadata->GetRawCameraMetadata());
   // TODO: Do we reallly need to copy here ?
   aidl_metadata->assign(metadata_p, metadata_p + metadata_size);
 
